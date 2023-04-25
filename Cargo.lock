@@ -982,6 +982,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fuse-rust"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a73d266f03bfb9c4c783e17223a2c2deaddfcf311cb548b6189041bc37067c0"
+
+[[package]]
 name = "futures"
 version = "0.3.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1260,6 +1266,7 @@ dependencies = [
  "bincode",
  "chrono",
  "directories-next",
+ "fuse-rust",
  "iced",
  "once_cell",
  "replace_with",

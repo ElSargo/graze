@@ -1,4 +1,5 @@
 use bincode::{deserialize, serialize};
+use fuse_rust::{Fuse, SearchResult};
 use iced::{
     event, keyboard, subscription,
     theme::{self, Theme},
@@ -10,12 +11,7 @@ use iced::{
 };
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
-use std::{
-    collections::{BTreeMap, HashMap},
-    fmt::Display,
-    mem::replace,
-    time::Duration,
-};
+use std::{collections::BTreeMap, fmt::Display, mem::replace, ops::Range, time::Duration};
 mod styles;
 use styles::*;
 
@@ -53,6 +49,29 @@ pub struct State {
 struct MealPickerState {
     input_field: String,
     selected_id: Option<MealId>,
+    search_results: Vec<SearchResultPlus>,
+    searched_meal_ids: Vec<MealId>,
+    selection_index: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SearchResultPlus {
+    /// corresponding index of the search result in the original list
+    pub index: usize,
+    /// Search rating of the search result, 0.0 is a perfect match 1.0 is a perfect mismatch
+    pub score: f64,
+    /// Ranges of matches in the search query, useful if you want to hightlight matches.
+    pub ranges: Vec<Range<usize>>,
+}
+
+impl From<SearchResult> for SearchResultPlus {
+    fn from(value: SearchResult) -> Self {
+        Self {
+            index: value.index,
+            score: value.score,
+            ranges: value.ranges,
+        }
+    }
 }
 
 #[derive(PartialEq, Copy, PartialOrd, Ord, Eq, Debug, Clone, Default, Serialize, Deserialize)]
@@ -116,7 +135,7 @@ struct SaveState {
     saving: bool,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub enum Page {
     DayView(Date),
     MealList,
@@ -140,9 +159,10 @@ pub enum Message {
         new_ingrediant_quantity: f64,
         new_unit: Unit,
     },
-    AddMealToDay(Date),
+    AddMealToDay(Date, MealId),
     BackPage,
     ChangeToPage(Page),
+    DownPressed,
     Loaded(State),
     MealPickerInput(String),
     MealPickerSubmit,
@@ -162,6 +182,7 @@ pub enum Message {
         ingrediant_idx: usize,
         field: IngrediantField,
     },
+    UpPressed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -254,13 +275,28 @@ impl Application for AppState {
             }
             Self::Loaded(state) => {
                 state.save.saved = false;
-                if let Message::Saved(succes) = message {
-                    state.save.saved = succes;
-                    state.save.saving = false;
-                }
                 let com = match message {
                     Message::MealPickerInput(input) => {
                         state.meal_picker_sate.input_field = input;
+                        state.meal_picker_sate.selection_index = 0;
+                        let searcher = Fuse::default();
+
+                        state.meal_picker_sate.search_results =
+                            if !state.meal_picker_sate.input_field.is_empty() {
+                                state.meal_picker_sate.searched_meal_ids =
+                                    state.meals.keys().cloned().collect();
+                                searcher
+                                    .search_text_in_iterable(
+                                        &state.meal_picker_sate.input_field,
+                                        state.meals.values().map(|meal| &meal.name),
+                                    )
+                                    .into_iter()
+                                    .map(|res| res.into())
+                                    .collect()
+                            } else {
+                                Vec::new()
+                            };
+
                         Command::none()
                     }
                     Message::AddMeal => {
@@ -297,20 +333,18 @@ impl Application for AppState {
                         );
                         Command::none()
                     }
-                    Message::AddMealToDay(date) => {
-                        if let Some(id) = state.meal_picker_sate.selected_id {
-                            match state.days.get_mut(&date) {
-                                Some(day) => day.meals.push(id),
-                                None => {
-                                    state.days.insert(
+                    Message::AddMealToDay(date, id) => {
+                        match state.days.get_mut(&date) {
+                            Some(day) => day.meals.push(id),
+                            None => {
+                                state.days.insert(
+                                    date,
+                                    Day {
                                         date,
-                                        Day {
-                                            date,
-                                            meals: Vec::new(),
-                                        },
-                                    );
-                                }
-                            };
+                                        meals: Vec::new(),
+                                    },
+                                );
+                            }
                         }
                         Command::none()
                     }
@@ -372,17 +406,41 @@ impl Application for AppState {
                         }
                         Command::none()
                     }
-                    Message::None | Message::Saved(_) => Command::none(),
+                    Message::Saved(succes) => {
+                        state.save.saved = succes;
+                        state.save.saving = false;
+                        Command::none()
+                    }
                     Message::SetMealCreationInputFeild(input) => {
                         state.meal_creation_input_field = input;
                         Command::none()
                     }
                     Message::Loaded(_) => unreachable!(),
                     Message::MealPickerSubmit => {
-                        let id = hash_str(&state.meal_picker_sate.input_field);
-                        if state.meals.contains_key(&id) {
-                            state.meal_picker_sate.selected_id = Some(id);
-                        };
+                        state.meal_picker_sate.selected_id = None;
+                        if !state.meal_picker_sate.search_results.is_empty() {
+                            if let Some(result) = state
+                                .meal_picker_sate
+                                .search_results
+                                .get(state.meal_picker_sate.selection_index)
+                            {
+                                if let Some(id) =
+                                    state.meal_picker_sate.searched_meal_ids.get(result.index)
+                                {
+                                    if state.meals.contains_key(id) {
+                                        state.meal_picker_sate.selected_id = Some(*id);
+                                    }
+                                }
+                            }
+                        } else {
+                            if let Some(id) = state
+                                .meals
+                                .keys()
+                                .nth(state.meal_picker_sate.selection_index)
+                            {
+                                state.meal_picker_sate.selected_id = Some(*id);
+                            }
+                        }
                         Command::perform(dummy(), |_| Message::BackPage)
                     }
                     Message::RemoveMeal(id) => {
@@ -396,6 +454,33 @@ impl Application for AppState {
                             widget::focus_next()
                         }
                     }
+                    Message::UpPressed | Message::DownPressed if state.page == Page::MealPicker => {
+                        let offset: isize = match message {
+                            Message::UpPressed => -1,
+                            Message::DownPressed => 1,
+                            _ => unreachable!(),
+                        };
+
+                        let new_index = ((state.meal_picker_sate.selection_index as isize + offset)
+                            .max(0) as usize)
+                            .min(
+                                match if state.meal_picker_sate.search_results.is_empty() {
+                                    state.meals.len()
+                                } else {
+                                    state.meal_picker_sate.search_results.len()
+                                }
+                                .checked_sub(1)
+                                {
+                                    Some(i) => i,
+                                    None => 0,
+                                },
+                            );
+
+                        state.meal_picker_sate.selection_index = new_index;
+
+                        Command::none()
+                    }
+                    _ => Command::none(),
                 };
                 let save_com = if !state.save.saving && !state.save.saved {
                     let copy = state.to_owned();
@@ -454,6 +539,28 @@ impl Application for AppState {
             ) => Some(Message::TabPressed {
                 shift: modifiers.shift(),
             }),
+            (
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    key_code: keyboard::KeyCode::Down,
+                    ..
+                })
+                | Event::Keyboard(keyboard::Event::KeyPressed {
+                    key_code: keyboard::KeyCode::J,
+                    ..
+                }),
+                event::Status::Ignored,
+            ) => Some(Message::DownPressed),
+            (
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    key_code: keyboard::KeyCode::Up,
+                    ..
+                })
+                | Event::Keyboard(keyboard::Event::KeyPressed {
+                    key_code: keyboard::KeyCode::K,
+                    ..
+                }),
+                event::Status::Ignored,
+            ) => Some(Message::UpPressed),
 
             _ => None,
         })
@@ -469,7 +576,7 @@ fn shopping_view<'a>(
     from: &usize,
     until: &usize,
 ) -> Column<'a, Message, Renderer<Theme>> {
-    let mut meals_and_count = HashMap::new();
+    let mut meals_and_count = BTreeMap::new();
     for (_, day) in state.days.range(from..until) {
         for meal in day.meals.iter() {
             if let Some(count) = meals_and_count.get_mut(meal) {
@@ -479,7 +586,7 @@ fn shopping_view<'a>(
             }
         }
     }
-    let mut list: HashMap<&String, f64> = HashMap::new();
+    let mut list: BTreeMap<&String, f64> = BTreeMap::new();
     for (meal_name, count) in meals_and_count {
         if let Some(meal) = state.meals.get(&meal_name) {
             for Ingrediant {
@@ -618,14 +725,24 @@ fn day_view<'a>(state: &State, date: &usize) -> Column<'a, Message, Renderer<The
     if let Some(day) = state.days.get(&date) {
         col![
             text(format!("Day {date}")),
-            row![
-                button(text(format!(
-                    "selected: <{}>",
-                    &state.meal_picker_sate.input_field
-                )))
-                .on_press(Message::ChangeToPage(Page::MealPicker)),
-                button("Submit").on_press(Message::AddMealToDay(*date))
-            ],
+            {
+                if let Some(id) = state.meal_picker_sate.selected_id {
+                    let meal_name = match state.meals.get(&id) {
+                        Some(meal) => &meal.name,
+                        None => "Meal not found",
+                    };
+                    row![
+                        button(text(format!("selected: {meal_name}")))
+                            .on_press(Message::ChangeToPage(Page::MealPicker)),
+                        button("Submit").on_press(Message::AddMealToDay(*date, id))
+                    ]
+                } else {
+                    row![
+                        button(text("select: ",)).on_press(Message::ChangeToPage(Page::MealPicker)),
+                        button("Submit")
+                    ]
+                }
+            },
             col(day
                 .meals
                 .iter()
@@ -661,11 +778,13 @@ fn meal_list_view<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
         col(list).spacing(5),
         row![
             text_input("New meal", &state.meal_creation_input_field)
-                .on_input(Message::SetMealCreationInputFeild,),
+                .on_input(Message::SetMealCreationInputFeild,)
+                .on_submit(Message::AddMeal),
             button("Add").on_press(Message::AddMeal)
         ]
         .spacing(10),
     ]
+    .spacing(10)
 }
 
 fn hash_str(s: &str) -> MealId {
@@ -703,9 +822,79 @@ fn week_view<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
 }
 
 fn meal_picker_view<'a>(state: &'a State) -> Column<'a, Message, Renderer<Theme>> {
-    col![text_input("Search", &state.meal_picker_sate.input_field)
-        .on_input(Message::MealPickerInput)
-        .on_submit(Message::MealPickerSubmit),]
+    let results: Column<Message, Renderer<Theme>> =
+        if state.meal_picker_sate.search_results.is_empty() {
+            col::<Message, Renderer<Theme>>(
+                state
+                    .meals
+                    .values()
+                    .enumerate()
+                    .map(|(i, meal)| {
+                        if i == state.meal_picker_sate.selection_index {
+                            text(format!("> {}", &meal.name))
+                        } else {
+                            text(&meal.name)
+                        }
+                        .into()
+                    })
+                    .collect(),
+            )
+        } else {
+            col(state
+                .meal_picker_sate
+                .search_results
+                .iter()
+                .enumerate()
+                .flat_map(|(i, result)| higlight_search_result(state, result, i))
+                .map(|row| row.into())
+                .collect())
+        };
+
+    col![
+        text_input("Search", &state.meal_picker_sate.input_field)
+            .on_input(Message::MealPickerInput)
+            .on_submit(Message::MealPickerSubmit),
+        results
+    ]
+    .spacing(30)
+}
+
+fn higlight_search_result<'a>(
+    state: &'a State,
+    result: &SearchResultPlus,
+    i: usize,
+) -> Option<Row<'a, Message, Renderer<Theme>>> {
+    let meal_id = state.meal_picker_sate.searched_meal_ids.get(result.index)?;
+    let meal_name = &state.meals.get(meal_id)?.name;
+    let mut text_substrings: Vec<Element<Message>> = Vec::new();
+    if i == state.meal_picker_sate.selection_index {
+        text_substrings.push(text("> ").size(20).into());
+    }
+
+    let mut i = 0usize;
+    let mut segments: Vec<(Range<usize>, bool)> = vec![];
+
+    result.ranges.iter().for_each(|range| {
+        if i < range.start {
+            segments.push((i..range.start, false));
+        }
+        segments.push((range.clone(), true));
+        i = range.end;
+    });
+    if i < meal_name.len() {
+        segments.push((i..meal_name.len(), false));
+    }
+
+    text_substrings.extend(segments.iter().map(|(range, is_match)| {
+        let text_label = text(String::from(&meal_name[range.clone()])).size(20);
+        if *is_match {
+            text_label.style(Color::from([1.0, 0.2, 0.2])).into()
+        } else {
+            text_label.into()
+        }
+    }));
+
+    Some(row(text_substrings).into())
 }
 
 fn bar_view<'a>() -> Row<'a, Message, Renderer<Theme>> {
