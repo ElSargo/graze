@@ -32,7 +32,6 @@
             rust
             pkgs.lldb_9
             pkgs.sccache
-            pkgs.fish
             pkgs.sccache
             pkgs.udev
             pkgs.alsa-lib
@@ -43,11 +42,8 @@
             pkgs.xorg.libXrandr
             pkgs.libxkbcommon
             pkgs.wayland
-            pkgs.bat
           ];
           LD_LIBRARY_PATH = nixpkgs.lib.makeLibraryPath buildInputs;
-          shellHook = # bash
-            "[ $0 = 'bash' ] && exec fish";
         };
       });
 }
