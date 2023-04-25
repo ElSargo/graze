@@ -2,7 +2,10 @@ use bincode::{deserialize, serialize};
 use iced::{
     event, keyboard, subscription,
     theme::{self, Theme},
-    widget::{self, button, column as col, pick_list, row, scrollable, text, text_input, Column},
+    widget::{
+        self, button, column as col, container, pick_list, row, scrollable, text, text_input,
+        Column, Row,
+    },
     Application, Color, Command, Element, Event, Length, Renderer, Settings, Subscription,
 };
 use serde::{Deserialize, Serialize};
@@ -410,36 +413,16 @@ impl Application for AppState {
         match self {
             AppState::Loading => text("Loading").into(),
             AppState::Loaded(state) => {
-                let bar = row![
-                    header_button("Back", BackButtonStyle).on_press(Message::BackPage),
-                    col![].width(Length::FillPortion(1)),
-                    header_button("Week", HeaderButtonStyle)
-                        .on_press(Message::ChangeToPage(Page::WeekView)),
-                    col![].width(Length::FillPortion(1)),
-                    header_button("List", HeaderButtonStyle).on_press(Message::ChangeToPage(
-                        Page::ShoppingView {
-                            from: 0,
-                            until: 100
-                        }
-                    )),
-                    col![].width(Length::FillPortion(1)),
-                    header_button("Meals", HeaderButtonStyle)
-                        .on_press(Message::ChangeToPage(Page::MealList)),
-                    col![].width(Length::FillPortion(1)),
-                    header_button("Calender", HeaderButtonStyle),
-                ]
-                .width(Length::Fill);
-                // let page = col![].spacing(10);
                 let page = match &state.page {
-                    Page::MealList => meal_list_page(state),
-                    Page::DayView(date) => day_view_page(state, date),
-                    Page::MealView(meal_id) => meal_view_page(state, meal_id),
-                    Page::WeekView => week_view_page(state),
-                    Page::ShoppingView { from, until } => shopping_view_page(state, from, until),
-                    Page::MealPicker => meal_picker_page(state),
+                    Page::MealList => meal_list_view(state),
+                    Page::DayView(date) => day_view(state, date),
+                    Page::MealView(meal_id) => meal_view(state, meal_id),
+                    Page::WeekView => week_view(state),
+                    Page::ShoppingView { from, until } => shopping_view(state, from, until),
+                    Page::MealPicker => meal_picker_view(state),
                 };
 
-                col![bar, scrollable(page)]
+                col![bar_view(), scrollable(page)]
                     .height(Length::Fill)
                     .width(Length::Fill)
                     .spacing(10)
@@ -481,7 +464,7 @@ impl Application for AppState {
     }
 }
 
-fn shopping_view_page<'a>(
+fn shopping_view<'a>(
     state: &State,
     from: &usize,
     until: &usize,
@@ -528,10 +511,7 @@ fn shopping_view_page<'a>(
     ]
 }
 
-fn meal_view_page<'a>(
-    state: &'a State,
-    meal_id: &'a [u8; 32],
-) -> Column<'a, Message, Renderer<Theme>> {
+fn meal_view<'a>(state: &'a State, meal_id: &'a [u8; 32]) -> Column<'a, Message, Renderer<Theme>> {
     if let Some(meal) = state.meals.get(meal_id) {
         let mut edit_buttons = Vec::with_capacity(meal.ingrediants.len());
         let mut edit_name = Vec::with_capacity(meal.ingrediants.len());
@@ -548,18 +528,18 @@ fn meal_view_page<'a>(
             },
         ) in meal.ingrediants.iter().enumerate()
         {
-            let (parsed_quantity, quantity_input_text) = match quantity_input {
+            let (previous_quantity_was_parsed, quantity_input_text) = match quantity_input {
                 Some(raw_input) => {
-                    let parsed_quantity = raw_input.parse().ok();
+                    let parsed_quantity: Option<f64> = raw_input.parse().ok();
                     (
-                        parsed_quantity,
+                        parsed_quantity.is_some(),
                         match parsed_quantity {
                             Some(q) => format!("{q}"),
                             None => raw_input.to_owned(),
                         },
                     )
                 }
-                None => (None, format!("{quantity}")),
+                None => (false, format!("{quantity}")),
             };
 
             edit_buttons.push(
@@ -581,15 +561,18 @@ fn meal_view_page<'a>(
             );
             edit_quantity.push(
                 text_input("edit quantity", &quantity_input_text)
-                    .on_input(move |input| Message::UpdateMealIngrediant {
-                        meal_name_id: meal_id.to_owned(),
-                        ingrediant_idx: i,
-                        field: IngrediantField::Quantity(parsed_quantity, input),
+                    .on_input(move |input| {
+                        let new_quantity = input.parse().ok();
+                        Message::UpdateMealIngrediant {
+                            meal_name_id: meal_id.to_owned(),
+                            ingrediant_idx: i,
+                            field: IngrediantField::Quantity(new_quantity, input),
+                        }
                     })
                     .into(),
             );
             quantity_was_parsed.push(
-                if parsed_quantity.is_some() {
+                if previous_quantity_was_parsed {
                     text("Y")
                 } else {
                     text("N")
@@ -631,7 +614,7 @@ fn meal_view_page<'a>(
     }
 }
 
-fn day_view_page<'a>(state: &State, date: &usize) -> Column<'a, Message, Renderer<Theme>> {
+fn day_view<'a>(state: &State, date: &usize) -> Column<'a, Message, Renderer<Theme>> {
     if let Some(day) = state.days.get(&date) {
         col![
             text(format!("Day {date}")),
@@ -661,26 +644,21 @@ fn day_view_page<'a>(state: &State, date: &usize) -> Column<'a, Message, Rendere
     }
 }
 
-fn meal_list_page<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
-    let mut meal_names = Vec::new();
-    let mut edit_buttons = Vec::new();
-    let mut remove_buttons = Vec::new();
+fn meal_list_view<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
+    let mut list = Vec::with_capacity(state.meals.len());
     for (id, meal) in state.meals.iter() {
-        meal_names.push(text(meal.name.as_str()).size(30).into());
-        edit_buttons.push(
-            button(edit_icon())
-                .on_press(Message::ChangeToPage(Page::MealView(*id)))
-                .into(),
+        list.push(
+            row![
+                container(text(meal.name.as_str()).size(20)).width(Length::Fill),
+                button(edit_icon()).on_press(Message::ChangeToPage(Page::MealView(*id))),
+                delete_button().on_press(Message::RemoveMeal(*id))
+            ]
+            .spacing(5)
+            .into(),
         );
-        remove_buttons.push(delete_button().on_press(Message::RemoveMeal(*id)).into())
     }
     col![
-        row![
-            col(meal_names).spacing(5),
-            col(edit_buttons).spacing(5),
-            col(remove_buttons).spacing(5)
-        ]
-        .spacing(5),
+        col(list).spacing(5),
         row![
             text_input("New meal", &state.meal_creation_input_field)
                 .on_input(Message::SetMealCreationInputFeild,),
@@ -700,7 +678,7 @@ fn hash_str(s: &str) -> MealId {
 }
 async fn dummy() -> () {}
 
-fn week_view_page<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
+fn week_view<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
     col![
         text("weeks"),
         button("add day").on_press(Message::AddDay),
@@ -724,8 +702,28 @@ fn week_view_page<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
     ]
 }
 
-fn meal_picker_page<'a>(state: &'a State) -> Column<'a, Message, Renderer<Theme>> {
+fn meal_picker_view<'a>(state: &'a State) -> Column<'a, Message, Renderer<Theme>> {
     col![text_input("Search", &state.meal_picker_sate.input_field)
         .on_input(Message::MealPickerInput)
         .on_submit(Message::MealPickerSubmit),]
+}
+
+fn bar_view<'a>() -> Row<'a, Message, Renderer<Theme>> {
+    row![
+        header_button("Back", BackButtonStyle).on_press(Message::BackPage),
+        col![].width(Length::FillPortion(1)),
+        header_button("Week", HeaderButtonStyle).on_press(Message::ChangeToPage(Page::WeekView)),
+        col![].width(Length::FillPortion(1)),
+        header_button("List", HeaderButtonStyle).on_press(Message::ChangeToPage(
+            Page::ShoppingView {
+                from: 0,
+                until: 100
+            }
+        )),
+        col![].width(Length::FillPortion(1)),
+        header_button("Meals", HeaderButtonStyle).on_press(Message::ChangeToPage(Page::MealList)),
+        col![].width(Length::FillPortion(1)),
+        header_button("Calender", HeaderButtonStyle),
+    ]
+    .width(Length::Fill)
 }
