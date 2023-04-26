@@ -30,7 +30,7 @@
 
           buildInputs = [
             rust
-            pkgs.lldb_9
+            pkgs.lldb_15
             pkgs.sccache
             pkgs.sccache
             pkgs.udev

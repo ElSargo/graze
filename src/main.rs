@@ -9,6 +9,7 @@ use iced::{
     },
     Application, Color, Command, Element, Event, Length, Renderer, Settings, Subscription,
 };
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use std::{collections::BTreeMap, fmt::Display, mem::replace, ops::Range, time::Duration};
@@ -18,13 +19,17 @@ use styles::*;
 fn main() {
     AppState::run(Settings {
         window: iced::window::Settings {
-            size: (300, 600),
+            size: (300, 650),
             ..Default::default()
         },
         ..Default::default()
     })
     .expect("App crashed");
 }
+
+static MEAL_ADDER_INPUT_ID: Lazy<text_input::Id> = Lazy::new(text_input::Id::unique);
+static MEAL_PICKER_INPUT_ID: Lazy<text_input::Id> = Lazy::new(text_input::Id::unique);
+static MEAL_INGREDIANT_ADDER_INPUT_ID: Lazy<text_input::Id> = Lazy::new(text_input::Id::unique);
 
 enum AppState {
     Loaded(State),
@@ -177,12 +182,12 @@ pub enum Message {
     TabPressed {
         shift: bool,
     },
+    UpPressed,
     UpdateMealIngrediant {
         meal_name_id: MealId,
         ingrediant_idx: usize,
         field: IngrediantField,
     },
-    UpPressed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -320,8 +325,20 @@ impl Application for AppState {
                         Command::none()
                     }
                     Message::ChangeToPage(page) => {
+                        let command = match page {
+                            Page::MealList => {
+                                iced::widget::text_input::focus(MEAL_ADDER_INPUT_ID.clone())
+                            }
+                            Page::MealPicker => {
+                                iced::widget::text_input::focus(MEAL_PICKER_INPUT_ID.clone())
+                            }
+                            Page::MealView(_) => iced::widget::text_input::focus(
+                                MEAL_INGREDIANT_ADDER_INPUT_ID.clone(),
+                            ),
+                            _ => Command::none(),
+                        };
                         state.stack.push(replace(&mut state.page, page));
-                        Command::none()
+                        command
                     }
                     Message::AddDay => {
                         state.days.insert(
@@ -382,8 +399,9 @@ impl Application for AppState {
                                     }
                                     IngrediantField::Unit(new_unit) => {
                                         *quantity =
-                                            *quantity * unit.to_grams(1.) / new_unit.to_grams(1.);
+                                            unit.to_grams(*quantity) / new_unit.to_grams(1.);
                                         *unit = new_unit;
+                                        *quantity_input = None;
                                     }
                                 }
                             }
@@ -679,7 +697,7 @@ fn meal_view<'a>(state: &'a State, meal_id: &'a [u8; 32]) -> Column<'a, Message,
                     .into(),
             );
             quantity_was_parsed.push(
-                if previous_quantity_was_parsed {
+                if previous_quantity_was_parsed || quantity_input.is_none() {
                     text("Y")
                 } else {
                     text("N")
@@ -716,6 +734,7 @@ fn meal_view<'a>(state: &'a State, meal_id: &'a [u8; 32]) -> Column<'a, Message,
                 new_unit: Unit::Grams,
             })
         ]
+        .spacing(10)
     } else {
         col![Element::<_>::from(text("Meal not found"))]
     }
@@ -779,7 +798,8 @@ fn meal_list_view<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
         row![
             text_input("New meal", &state.meal_creation_input_field)
                 .on_input(Message::SetMealCreationInputFeild,)
-                .on_submit(Message::AddMeal),
+                .on_submit(Message::AddMeal)
+                .id(MEAL_ADDER_INPUT_ID.clone()),
             button("Add").on_press(Message::AddMeal)
         ]
         .spacing(10),
@@ -853,7 +873,8 @@ fn meal_picker_view<'a>(state: &'a State) -> Column<'a, Message, Renderer<Theme>
     col![
         text_input("Search", &state.meal_picker_sate.input_field)
             .on_input(Message::MealPickerInput)
-            .on_submit(Message::MealPickerSubmit),
+            .on_submit(Message::MealPickerSubmit)
+            .id(MEAL_PICKER_INPUT_ID.clone()),
         results
     ]
     .spacing(30)

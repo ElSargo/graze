@@ -1268,6 +1268,7 @@ dependencies = [
  "directories-next",
  "fuse-rust",
  "iced",
+ "lazy_static",
  "once_cell",
  "replace_with",
  "serde",
