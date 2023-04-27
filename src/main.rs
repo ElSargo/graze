@@ -5,10 +5,7 @@
     clippy::pedantic,
     clippy::style,
     clippy::perf,
-    // clippy::cargo,
-    // clippy::restriction,
     clippy::absurd_extreme_comparisons,
-    // clippy::nursery
     clippy::nursery
 )]
 
@@ -23,6 +20,7 @@ use iced::{
     },
     Application, Color, Command, Element, Event, Length, Renderer, Settings, Subscription,
 };
+use itertools::Itertools;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
@@ -163,7 +161,7 @@ pub enum Page {
     DayView(Date),
     MealList,
     MealPicker,
-    MealView(MealId),
+    MealEditorView(MealId),
     ShoppingView {
         from: Date,
         until: Date,
@@ -185,7 +183,6 @@ pub enum Message {
     AddMealToDay(Date, MealId),
     BackPage,
     ChangeToPage(Page),
-    DownPressed,
     Loaded(State),
     MealPickerInput(String),
     MealPickerSubmit(Option<MealId>),
@@ -200,12 +197,12 @@ pub enum Message {
     TabPressed {
         shift: bool,
     },
-    UpPressed,
     UpdateMealIngrediant {
         meal_name_id: MealId,
         ingrediant_idx: usize,
         field: IngrediantField,
     },
+    VerticalMovement(isize),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -294,211 +291,7 @@ impl Application for AppState {
                 }
                 Command::none()
             }
-            Self::Loaded(state) => {
-                state.save.saved = false;
-                let com = match message {
-                    Message::MealPickerInput(input) => {
-                        state.meal_picker_sate.input_field = input;
-                        state.meal_picker_sate.selection_index = 0;
-                        let searcher = Fuse::default();
-
-                        state.meal_picker_sate.search_results =
-                            if state.meal_picker_sate.input_field.is_empty() {
-                                Vec::new()
-                            } else {
-                                state.meal_picker_sate.searched_meal_ids =
-                                    state.meals.keys().copied().collect();
-                                searcher
-                                    .search_text_in_iterable(
-                                        &state.meal_picker_sate.input_field,
-                                        state.meals.values().map(|meal| &meal.name),
-                                    )
-                                    .into_iter()
-                                    .map(std::convert::Into::into)
-                                    .collect()
-                            };
-
-                        Command::none()
-                    }
-                    Message::AddMeal => {
-                        state.meals.insert(
-                            hash_str(&state.meal_creation_input_field),
-                            Meal {
-                                name: state.meal_creation_input_field.clone(),
-                                ingrediants: Vec::new(),
-                            },
-                        );
-                        state.meal_creation_input_field = String::new();
-                        Command::none()
-                    }
-                    Message::RemoveMealIngrediant {
-                        meal_name_id: meal_name_hash,
-                        ingrediant_idx,
-                    } => {
-                        if let Some(meal) = state.meals.get_mut(&meal_name_hash) {
-                            meal.ingrediants.remove(ingrediant_idx);
-                        }
-                        Command::none()
-                    }
-                    Message::ChangeToPage(page) => {
-                        let command = match page {
-                            Page::MealList => {
-                                iced::widget::text_input::focus(MEAL_ADDER_INPUT_ID.clone())
-                            }
-                            Page::MealPicker => {
-                                iced::widget::text_input::focus(MEAL_PICKER_INPUT_ID.clone())
-                            }
-                            Page::MealView(_) => iced::widget::text_input::focus(
-                                MEAL_INGREDIANT_ADDER_INPUT_ID.clone(),
-                            ),
-                            _ => Command::none(),
-                        };
-                        state.stack.push(replace(&mut state.page, page));
-                        command
-                    }
-                    Message::AddDay => {
-                        state.days.insert(
-                            state.days.len(),
-                            Day {
-                                date: state.days.len(),
-                                meals: Vec::new(),
-                            },
-                        );
-                        Command::none()
-                    }
-                    Message::AddMealToDay(date, id) => {
-                        match state.days.get_mut(&date) {
-                            Some(day) => day.meals.push(id),
-                            None => {
-                                state.days.insert(
-                                    date,
-                                    Day {
-                                        date,
-                                        meals: Vec::new(),
-                                    },
-                                );
-                            }
-                        }
-                        Command::none()
-                    }
-                    Message::BackPage => {
-                        back_page(state);
-                        Command::none()
-                    }
-                    Message::UpdateMealIngrediant {
-                        meal_name_id: meal_name_hash,
-                        ingrediant_idx,
-                        field,
-                    } => {
-                        if let Some(meal) = state.meals.get_mut(&meal_name_hash) {
-                            if let Some(Ingrediant {
-                                name,
-                                quantity,
-                                quantity_input,
-                                unit,
-                            }) = meal.ingrediants.get_mut(ingrediant_idx)
-                            {
-                                match field {
-                                    IngrediantField::Quantity(
-                                        new_quantity_option,
-                                        new_quantity_input,
-                                    ) => {
-                                        if let Some(new_quantity) = new_quantity_option {
-                                            *quantity = new_quantity;
-                                        }
-                                        *quantity_input = Some(new_quantity_input);
-                                    }
-                                    IngrediantField::Name(new_name) => {
-                                        *name = new_name;
-                                    }
-                                    IngrediantField::Unit(new_unit) => {
-                                        *quantity =
-                                            unit.to_grams(*quantity) / new_unit.to_grams(1.);
-                                        *unit = new_unit;
-                                        *quantity_input = None;
-                                    }
-                                }
-                            }
-                        }
-                        Command::none()
-                    }
-                    Message::AddMealIngrediant {
-                        meal_id: meal_name,
-                        new_ingrediant_name,
-                        new_ingrediant_quantity,
-                        new_unit,
-                    } => {
-                        if let Some(meal) = state.meals.get_mut(&meal_name) {
-                            meal.ingrediants.push(Ingrediant {
-                                name: new_ingrediant_name,
-                                quantity: new_ingrediant_quantity,
-                                quantity_input: None,
-                                unit: new_unit,
-                            });
-                        }
-                        Command::none()
-                    }
-                    Message::Saved(succes) => {
-                        state.save.saved = succes;
-                        state.save.saving = false;
-                        Command::none()
-                    }
-                    Message::SetMealCreationInputFeild(input) => {
-                        state.meal_creation_input_field = input;
-                        Command::none()
-                    }
-                    Message::Loaded(_) => unreachable!(),
-                    Message::MealPickerSubmit(meal_id) => {
-                        state.meal_picker_sate.selected_id = meal_id;
-                        back_page(state);
-                        Command::none()
-                    }
-                    Message::RemoveMeal(id) => {
-                        state.meals.remove(&id);
-                        Command::none()
-                    }
-                    Message::TabPressed { shift } => {
-                        if shift {
-                            widget::focus_previous()
-                        } else {
-                            widget::focus_next()
-                        }
-                    }
-                    Message::UpPressed | Message::DownPressed if state.page == Page::MealPicker => {
-                        let offset: isize = match message {
-                            Message::UpPressed => -1,
-                            Message::DownPressed => 1,
-                            _ => unreachable!(),
-                        };
-
-                        let new_index = state
-                            .meal_picker_sate
-                            .selection_index
-                            .saturating_add_signed(offset)
-                            .min(
-                                if state.meal_picker_sate.search_results.is_empty() {
-                                    state.meals.len()
-                                } else {
-                                    state.meal_picker_sate.search_results.len()
-                                }
-                                .saturating_sub(1),
-                            );
-
-                        state.meal_picker_sate.selection_index = new_index;
-
-                        Command::none()
-                    }
-                    _ => Command::none(),
-                };
-                let save_com = if state.save.saving || state.save.saved {
-                    Command::none()
-                } else {
-                    let copy = state.clone();
-                    state.save.saving = true;
-                    Command::perform(copy.save("./data"), Message::Saved)
-                };
-                Command::batch([com, save_com])
-            }
+            Self::Loaded(state) => update_ui(state, message),
         }
     }
 
@@ -509,7 +302,7 @@ impl Application for AppState {
                 let page = match &state.page {
                     Page::MealList => meal_list_view(state),
                     Page::DayView(date) => day_view(state, *date),
-                    Page::MealView(meal_id) => meal_view(state, meal_id),
+                    Page::MealEditorView(meal_id) => meal_editor(state, meal_id),
                     Page::WeekView => week_view(state),
                     Page::ShoppingView { from, until } => shopping_view(state, *from, *until),
                     Page::MealPicker => meal_picker_view(state),
@@ -553,14 +346,14 @@ impl Application for AppState {
                     ..
                 }),
                 event::Status::Ignored,
-            ) => Some(Message::DownPressed),
+            ) => Some(Message::VerticalMovement(1)),
             (
                 Event::Keyboard(keyboard::Event::KeyPressed {
                     key_code: keyboard::KeyCode::Up | keyboard::KeyCode::K,
                     ..
                 }),
                 event::Status::Ignored,
-            ) => Some(Message::UpPressed),
+            ) => Some(Message::VerticalMovement(-1)),
 
             _ => None,
         })
@@ -569,6 +362,237 @@ impl Application for AppState {
     fn scale_factor(&self) -> f64 {
         1.0
     }
+}
+
+fn update_ui(state: &mut State, message: Message) -> Command<Message> {
+    state.save.saved = false;
+    let com = match message {
+        Message::MealPickerInput(input) => on_message_meal_picker_input(state, input),
+        Message::AddMeal => on_message_add_meal(state),
+        Message::RemoveMealIngrediant {
+            meal_name_id: meal_name_hash,
+            ingrediant_idx,
+        } => on_message_remove_meal_ingrediant(state, meal_name_hash, ingrediant_idx),
+        Message::ChangeToPage(page) => on_message_change_page(page, state),
+        Message::AddDay => on_message_add_day(state),
+        Message::AddMealToDay(date, id) => on_message_add_meal_to_day(state, date, id),
+        Message::BackPage => {
+            back_page(state);
+            Command::none()
+        }
+        Message::UpdateMealIngrediant {
+            meal_name_id: meal_name_hash,
+            ingrediant_idx,
+            field,
+        } => on_message_update_meal_ingrediant(state, meal_name_hash, ingrediant_idx, field),
+        Message::AddMealIngrediant {
+            meal_id: meal_name,
+            new_ingrediant_name,
+            new_ingrediant_quantity,
+            new_unit,
+        } => on_message_add_meal_ingrediant(
+            state,
+            meal_name,
+            new_ingrediant_name,
+            new_ingrediant_quantity,
+            new_unit,
+        ),
+        Message::Saved(succes) => {
+            state.save.saved = succes;
+            state.save.saving = false;
+            Command::none()
+        }
+        Message::SetMealCreationInputFeild(input) => {
+            state.meal_creation_input_field = input;
+            Command::none()
+        }
+        Message::Loaded(_) => unreachable!(),
+        Message::MealPickerSubmit(meal_id) => {
+            state.meal_picker_sate.selected_id = meal_id;
+            back_page(state);
+            Command::none()
+        }
+        Message::RemoveMeal(id) => {
+            state.meals.remove(&id);
+            Command::none()
+        }
+        Message::TabPressed { shift } => {
+            if shift {
+                widget::focus_previous()
+            } else {
+                widget::focus_next()
+            }
+        }
+        Message::VerticalMovement(movment) if state.page == Page::MealPicker => {
+            on_message_vertical_movement(movment, state)
+        }
+        _ => Command::none(),
+    };
+    let save_com = if state.save.saving || state.save.saved {
+        Command::none()
+    } else {
+        let copy = state.clone();
+        state.save.saving = true;
+        Command::perform(copy.save("./data"), Message::Saved)
+    };
+    Command::batch([com, save_com])
+}
+
+fn on_message_vertical_movement(offset: isize, state: &mut State) -> Command<Message> {
+    let new_index = state
+        .meal_picker_sate
+        .selection_index
+        .saturating_add_signed(offset)
+        .min(
+            if state.meal_picker_sate.search_results.is_empty() {
+                state.meals.len()
+            } else {
+                state.meal_picker_sate.search_results.len()
+            }
+            .saturating_sub(1),
+        );
+
+    state.meal_picker_sate.selection_index = new_index;
+
+    Command::none()
+}
+
+fn on_message_add_meal_ingrediant(
+    state: &mut State,
+    meal_name: [u8; 32],
+    new_ingrediant_name: String,
+    new_ingrediant_quantity: f64,
+    new_unit: Unit,
+) -> Command<Message> {
+    if let Some(meal) = state.meals.get_mut(&meal_name) {
+        meal.ingrediants.push(Ingrediant {
+            name: new_ingrediant_name,
+            quantity: new_ingrediant_quantity,
+            quantity_input: None,
+            unit: new_unit,
+        });
+    }
+    Command::none()
+}
+
+fn on_message_add_meal_to_day(state: &mut State, date: usize, id: [u8; 32]) -> Command<Message> {
+    match state.days.get_mut(&date) {
+        Some(day) => day.meals.push(id),
+        None => {
+            state.days.insert(
+                date,
+                Day {
+                    date,
+                    meals: Vec::new(),
+                },
+            );
+        }
+    }
+    Command::none()
+}
+
+fn on_message_add_day(state: &mut State) -> Command<Message> {
+    state.days.insert(
+        state.days.len(),
+        Day {
+            date: state.days.len(),
+            meals: Vec::new(),
+        },
+    );
+    Command::none()
+}
+
+fn on_message_change_page(page: Page, state: &mut State) -> Command<Message> {
+    let command = match page {
+        Page::MealList => iced::widget::text_input::focus(MEAL_ADDER_INPUT_ID.clone()),
+        Page::MealPicker => iced::widget::text_input::focus(MEAL_PICKER_INPUT_ID.clone()),
+        Page::MealEditorView(_) => {
+            iced::widget::text_input::focus(MEAL_INGREDIANT_ADDER_INPUT_ID.clone())
+        }
+        _ => Command::none(),
+    };
+    state.stack.push(replace(&mut state.page, page));
+    command
+}
+
+fn on_message_remove_meal_ingrediant(
+    state: &mut State,
+    meal_name_hash: [u8; 32],
+    ingrediant_idx: usize,
+) -> Command<Message> {
+    if let Some(meal) = state.meals.get_mut(&meal_name_hash) {
+        meal.ingrediants.remove(ingrediant_idx);
+    }
+    Command::none()
+}
+
+fn on_message_add_meal(state: &mut State) -> Command<Message> {
+    state.meals.insert(
+        hash_str(&state.meal_creation_input_field),
+        Meal {
+            name: state.meal_creation_input_field.clone(),
+            ingrediants: Vec::new(),
+        },
+    );
+    state.meal_creation_input_field = String::new();
+    Command::none()
+}
+
+fn on_message_meal_picker_input(state: &mut State, input: String) -> Command<Message> {
+    state.meal_picker_sate.input_field = input;
+    state.meal_picker_sate.selection_index = 0;
+    let searcher = Fuse::default();
+
+    state.meal_picker_sate.search_results = if state.meal_picker_sate.input_field.is_empty() {
+        Vec::new()
+    } else {
+        state.meal_picker_sate.searched_meal_ids = state.meals.keys().copied().collect();
+        searcher
+            .search_text_in_iterable(
+                &state.meal_picker_sate.input_field,
+                state.meals.values().map(|meal| &meal.name),
+            )
+            .into_iter()
+            .map(std::convert::Into::into)
+            .collect()
+    };
+
+    Command::none()
+}
+
+fn on_message_update_meal_ingrediant(
+    state: &mut State,
+    meal_name_hash: [u8; 32],
+    ingrediant_idx: usize,
+    field: IngrediantField,
+) -> Command<Message> {
+    if let Some(meal) = state.meals.get_mut(&meal_name_hash) {
+        if let Some(Ingrediant {
+            name,
+            quantity,
+            quantity_input,
+            unit,
+        }) = meal.ingrediants.get_mut(ingrediant_idx)
+        {
+            match field {
+                IngrediantField::Quantity(new_quantity_option, new_quantity_input) => {
+                    if let Some(new_quantity) = new_quantity_option {
+                        *quantity = new_quantity;
+                    }
+                    *quantity_input = Some(new_quantity_input);
+                }
+                IngrediantField::Name(new_name) => {
+                    *name = new_name;
+                }
+                IngrediantField::Unit(new_unit) => {
+                    *quantity = unit.to_grams(*quantity) / new_unit.to_grams(1.);
+                    *unit = new_unit;
+                    *quantity_input = None;
+                }
+            }
+        }
+    }
+    Command::none()
 }
 
 fn back_page(state: &mut State) {
@@ -626,84 +650,81 @@ fn shopping_view<'a>(
     ]
 }
 
-fn meal_view<'a>(state: &'a State, meal_id: &'a [u8; 32]) -> Column<'a, Message, Renderer<Theme>> {
+fn meal_editor<'a>(
+    state: &'a State,
+    meal_id: &'a [u8; 32],
+) -> Column<'a, Message, Renderer<Theme>> {
     state.meals.get(meal_id).map_or_else(
         || col![Element::<_>::from(text("Meal not found"))],
         |meal| {
-            let mut delete_buttons = Vec::with_capacity(meal.ingrediants.len());
-            let mut edit_name = Vec::with_capacity(meal.ingrediants.len());
-            let mut edit_quantity = Vec::with_capacity(meal.ingrediants.len());
-            let mut quantity_was_parsed = Vec::with_capacity(meal.ingrediants.len());
-            let mut edit_unit = Vec::with_capacity(meal.ingrediants.len());
-            for (
-                i,
-                Ingrediant {
-                    name,
-                    quantity,
-                    quantity_input,
-                    unit,
-                },
-            ) in meal.ingrediants.iter().enumerate()
-            {
-                let (previous_quantity_was_parsed, quantity_input_text) =
-                    quantity_input.as_ref().map_or_else(
-                        || (false, format!("{quantity}")),
-                        |raw_input| {
-                            let parsed_quantity: Option<f64> = raw_input.parse().ok();
-                            (
-                                parsed_quantity.is_some(),
-                                parsed_quantity
-                                    .map_or_else(|| raw_input.clone(), |q| format!("{q}")),
-                            )
+            let (delete_buttons, edit_name, edit_quantity, quantity_was_parsed, edit_unit) = meal
+                .ingrediants
+                .iter()
+                .enumerate()
+                .map(
+                    |(
+                        i,
+                        Ingrediant {
+                            name,
+                            quantity,
+                            quantity_input,
+                            unit,
                         },
-                    );
+                    )| {
+                        let (previous_quantity_was_parsed, quantity_input_text) =
+                            quantity_input.as_ref().map_or_else(
+                                || (false, format!("{quantity}")),
+                                |raw_input| {
+                                    let parsed_quantity: Option<f64> = raw_input.parse().ok();
+                                    (
+                                        parsed_quantity.is_some(),
+                                        parsed_quantity
+                                            .map_or_else(|| raw_input.clone(), |q| format!("{q}")),
+                                    )
+                                },
+                            );
 
-                delete_buttons.push(
-                    delete_button()
-                        .on_press(Message::RemoveMealIngrediant {
-                            meal_name_id: *meal_id,
-                            ingrediant_idx: i,
-                        })
-                        .into(),
-                );
-                edit_name.push(
-                    text_input(name, name)
-                        .on_input(move |s| Message::UpdateMealIngrediant {
-                            meal_name_id: *meal_id,
-                            ingrediant_idx: i,
-                            field: IngrediantField::Name(s),
-                        })
-                        .into(),
-                );
-                edit_quantity.push(
-                    text_input("edit quantity", &quantity_input_text)
-                        .on_input(move |input| {
-                            let new_quantity = input.parse().ok();
-                            Message::UpdateMealIngrediant {
+                        (
+                            delete_button()
+                                .on_press(Message::RemoveMealIngrediant {
+                                    meal_name_id: *meal_id,
+                                    ingrediant_idx: i,
+                                })
+                                .into(),
+                            text_input(name, name)
+                                .on_input(move |s| Message::UpdateMealIngrediant {
+                                    meal_name_id: *meal_id,
+                                    ingrediant_idx: i,
+                                    field: IngrediantField::Name(s),
+                                })
+                                .into(),
+                            text_input("edit quantity", &quantity_input_text)
+                                .on_input(move |input| {
+                                    let new_quantity = input.parse().ok();
+                                    Message::UpdateMealIngrediant {
+                                        meal_name_id: *meal_id,
+                                        ingrediant_idx: i,
+                                        field: IngrediantField::Quantity(new_quantity, input),
+                                    }
+                                })
+                                .into(),
+                            if previous_quantity_was_parsed || quantity_input.is_none() {
+                                text("Y")
+                            } else {
+                                text("N")
+                            }
+                            .into(),
+                            pick_list(UNITS, Some(*unit), move |u| Message::UpdateMealIngrediant {
                                 meal_name_id: *meal_id,
                                 ingrediant_idx: i,
-                                field: IngrediantField::Quantity(new_quantity, input),
-                            }
-                        })
-                        .into(),
-                );
-                quantity_was_parsed.push(
-                    if previous_quantity_was_parsed || quantity_input.is_none() {
-                        text("Y")
-                    } else {
-                        text("N")
-                    }
-                    .into(),
-                );
-                edit_unit.push(
-                    pick_list(UNITS, Some(*unit), move |u| Message::UpdateMealIngrediant {
-                        meal_name_id: *meal_id,
-                        ingrediant_idx: i,
-                        field: IngrediantField::Unit(u),
-                    })
-                    .into(),
-                );
-            }
+                                field: IngrediantField::Unit(u),
+                            })
+                            .into(),
+                        )
+                    },
+                )
+                .multiunzip();
+
             col![
                 text(
                     state
@@ -770,7 +791,7 @@ fn day_view<'a>(state: &State, date: Date) -> Column<'a, Message, Renderer<Theme
                                 .get(id)
                                 .map_or("meal not found", |meal| meal.name.as_str()),
                         ))
-                        .on_press(Message::ChangeToPage(Page::MealView(*id)))
+                        .on_press(Message::ChangeToPage(Page::MealEditorView(*id)))
                         .into()
                     })
                     .collect()),
@@ -785,8 +806,8 @@ fn meal_list_view<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
         list.push(
             container(
                 row![
-                    container(text(meal.name.as_str()).size(20)).width(Length::Fill),
-                    button(edit_icon()).on_press(Message::ChangeToPage(Page::MealView(*id))),
+                    button(text(meal.name.as_str()).size(30)).width(Length::Fill),
+                    button(edit_icon()).on_press(Message::ChangeToPage(Page::MealEditorView(*id))),
                     delete_button().on_press(Message::RemoveMeal(*id))
                 ]
                 .spacing(5),
