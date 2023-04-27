@@ -1,3 +1,16 @@
+#![forbid(
+    // clippy::suspicious,
+    clippy::complexity,
+    clippy::correctness,
+    // clippy::pedantic,
+    clippy::style,
+    clippy::perf,
+    clippy::cargo,
+    // clippy::restriction,
+    clippy::absurd_extreme_comparisons,
+    clippy::nursery
+)]
+
 use bincode::{deserialize, serialize};
 use fuse_rust::{Fuse, SearchResult};
 use iced::{
@@ -12,7 +25,13 @@ use iced::{
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
-use std::{collections::BTreeMap, fmt::Display, mem::replace, ops::Range, time::Duration};
+use std::{
+    collections::BTreeMap,
+    fmt::Display,
+    mem::{replace, take},
+    ops::Range,
+    time::Duration,
+};
 mod styles;
 use styles::*;
 
@@ -102,7 +121,7 @@ static UNITS: &[Unit] = &[
 ];
 
 impl Unit {
-    fn to_grams(&self, quantity: f64) -> f64 {
+    fn to_grams(self, quantity: f64) -> f64 {
         quantity
             * match self {
                 Unit::Grams => 1.0,
@@ -170,7 +189,7 @@ pub enum Message {
     DownPressed,
     Loaded(State),
     MealPickerInput(String),
-    MealPickerSubmit,
+    MealPickerSubmit(Option<MealId>),
     None,
     RemoveMeal(MealId),
     RemoveMealIngrediant {
@@ -216,7 +235,7 @@ impl State {
     async fn save(self, path: &str) -> bool {
         println!("Saving");
         if let Ok(bytes) = serialize(&self) {
-            if let Err(_) = async_std::fs::write(path, &bytes).await {
+            if async_std::fs::write(path, &bytes).await.is_err() {
                 return false;
             }
         }
@@ -434,31 +453,8 @@ impl Application for AppState {
                         Command::none()
                     }
                     Message::Loaded(_) => unreachable!(),
-                    Message::MealPickerSubmit => {
-                        state.meal_picker_sate.selected_id = None;
-                        if !state.meal_picker_sate.search_results.is_empty() {
-                            if let Some(result) = state
-                                .meal_picker_sate
-                                .search_results
-                                .get(state.meal_picker_sate.selection_index)
-                            {
-                                if let Some(id) =
-                                    state.meal_picker_sate.searched_meal_ids.get(result.index)
-                                {
-                                    if state.meals.contains_key(id) {
-                                        state.meal_picker_sate.selected_id = Some(*id);
-                                    }
-                                }
-                            }
-                        } else {
-                            if let Some(id) = state
-                                .meals
-                                .keys()
-                                .nth(state.meal_picker_sate.selection_index)
-                            {
-                                state.meal_picker_sate.selected_id = Some(*id);
-                            }
-                        }
+                    Message::MealPickerSubmit(meal_id) => {
+                        state.meal_picker_sate.selected_id = meal_id;
                         Command::perform(dummy(), |_| Message::BackPage)
                     }
                     Message::RemoveMeal(id) => {
@@ -479,19 +475,19 @@ impl Application for AppState {
                             _ => unreachable!(),
                         };
 
-                        let new_index = ((state.meal_picker_sate.selection_index as isize + offset)
-                            .max(0) as usize)
+                        let new_index = state
+                            .meal_picker_sate
+                            .selection_index
+                            .checked_add_signed(offset)
+                            .unwrap_or(0)
                             .min(
-                                match if state.meal_picker_sate.search_results.is_empty() {
+                                if state.meal_picker_sate.search_results.is_empty() {
                                     state.meals.len()
                                 } else {
                                     state.meal_picker_sate.search_results.len()
                                 }
                                 .checked_sub(1)
-                                {
-                                    Some(i) => i,
-                                    None => 0,
-                                },
+                                .unwrap_or(0),
                             );
 
                         state.meal_picker_sate.selection_index = new_index;
@@ -617,10 +613,10 @@ fn shopping_view<'a>(
                 let ammount = unit.to_grams(quantity * count);
                 match list.get_mut(&name) {
                     Some(total) => {
-                        *total = *total + ammount;
+                        *total += ammount;
                     }
                     None => {
-                        list.insert(&name, ammount);
+                        list.insert(name, ammount);
                     }
                 };
             }
@@ -638,7 +634,7 @@ fn shopping_view<'a>(
 
 fn meal_view<'a>(state: &'a State, meal_id: &'a [u8; 32]) -> Column<'a, Message, Renderer<Theme>> {
     if let Some(meal) = state.meals.get(meal_id) {
-        let mut edit_buttons = Vec::with_capacity(meal.ingrediants.len());
+        let mut delete_buttons = Vec::with_capacity(meal.ingrediants.len());
         let mut edit_name = Vec::with_capacity(meal.ingrediants.len());
         let mut edit_quantity = Vec::with_capacity(meal.ingrediants.len());
         let mut quantity_was_parsed = Vec::with_capacity(meal.ingrediants.len());
@@ -667,7 +663,7 @@ fn meal_view<'a>(state: &'a State, meal_id: &'a [u8; 32]) -> Column<'a, Message,
                 None => (false, format!("{quantity}")),
             };
 
-            edit_buttons.push(
+            delete_buttons.push(
                 delete_button()
                     .on_press(Message::RemoveMealIngrediant {
                         meal_name_id: meal_id.to_owned(),
@@ -719,11 +715,11 @@ fn meal_view<'a>(state: &'a State, meal_id: &'a [u8; 32]) -> Column<'a, Message,
                 None => "Unknown Meal",
             }),
             row![
-                col(edit_buttons),
-                col(edit_name).width(Length::FillPortion(2)),
-                col(edit_quantity).width(Length::FillPortion(1)),
-                col(quantity_was_parsed),
-                col(edit_unit).width(Length::FillPortion(1))
+                col(delete_buttons).spacing(5),
+                col(edit_name).spacing(5).width(Length::FillPortion(2)),
+                col(edit_quantity).spacing(5).width(Length::FillPortion(1)),
+                col(quantity_was_parsed).spacing(5),
+                col(edit_unit).spacing(5).width(Length::FillPortion(1))
             ]
             .width(Length::Fill)
             .spacing(10), // .padding(10),
@@ -766,10 +762,12 @@ fn day_view<'a>(state: &State, date: &usize) -> Column<'a, Message, Renderer<The
                 .meals
                 .iter()
                 .map(|id| {
-                    button(text(match state.meals.get(id) {
-                        Some(meal) => meal.name.as_str(),
-                        None => "meal not found",
-                    }))
+                    button(text(
+                        state
+                            .meals
+                            .get(id)
+                            .map_or("meal not found", |meal| meal.name.as_str()),
+                    ))
                     .on_press(Message::ChangeToPage(Page::MealView(*id)))
                     .into()
                 })
@@ -784,17 +782,21 @@ fn meal_list_view<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
     let mut list = Vec::with_capacity(state.meals.len());
     for (id, meal) in state.meals.iter() {
         list.push(
-            row![
-                container(text(meal.name.as_str()).size(20)).width(Length::Fill),
-                button(edit_icon()).on_press(Message::ChangeToPage(Page::MealView(*id))),
-                delete_button().on_press(Message::RemoveMeal(*id))
-            ]
-            .spacing(5)
+            container(
+                row![
+                    container(text(meal.name.as_str()).size(20)).width(Length::Fill),
+                    button(edit_icon()).on_press(Message::ChangeToPage(Page::MealView(*id))),
+                    delete_button().on_press(Message::RemoveMeal(*id))
+                ]
+                .spacing(5),
+            )
+            .style(theme::Container::Box)
+            .padding(5)
             .into(),
         );
     }
     col![
-        col(list).spacing(5),
+        col(list).spacing(10),
         row![
             text_input("New meal", &state.meal_creation_input_field)
                 .on_input(Message::SetMealCreationInputFeild,)
@@ -813,69 +815,115 @@ fn hash_str(s: &str) -> MealId {
     let data: Vec<_> = hasher.finalize().into_iter().collect();
     let mut slice: [u8; 32] = [0; 32];
     slice.copy_from_slice(&data[0..32]);
-    unsafe { std::mem::transmute(slice) }
+    slice
 }
-async fn dummy() -> () {}
+async fn dummy() {}
 
 fn week_view<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
-    col![
-        text("weeks"),
-        button("add day").on_press(Message::AddDay),
-        col(state
-            .days
-            .iter()
-            .flat_map(|(_, day)| {
-                let mut widgets = Vec::with_capacity(2);
-                let content = format!("Day: {}, {} meals added", day.date, day.meals.len());
-                if day.date % 7 == 0 {
-                    widgets.push(text("Week").into());
-                }
-                widgets.push(
-                    button(text(content))
-                        .on_press(Message::ChangeToPage(Page::DayView(day.date)))
-                        .into(),
-                );
-                widgets
-            })
-            .collect::<Vec<_>>())
-    ]
+    let mut weeks = Vec::new();
+    let mut week = Vec::new();
+    let mut push_week = |week| {
+        weeks.push(
+            container(col(week).spacing(5))
+                .style(theme::Container::Box)
+                .padding(5)
+                .into(),
+        );
+    };
+    for (date, day) in state.days.iter() {
+        if date % 7 == 0 && !week.is_empty() {
+            push_week(take(&mut week));
+            continue;
+        }
+
+        week.push(
+            button(text(format!(
+                "Day {date}: {} meals addded",
+                day.meals.len()
+            )))
+            .on_press(Message::ChangeToPage(Page::DayView(*date)))
+            .into(),
+        );
+    }
+    push_week(week);
+    col(weeks).spacing(10)
 }
 
-fn meal_picker_view<'a>(state: &'a State) -> Column<'a, Message, Renderer<Theme>> {
-    let results: Column<Message, Renderer<Theme>> =
-        if state.meal_picker_sate.search_results.is_empty() {
-            col::<Message, Renderer<Theme>>(
-                state
-                    .meals
-                    .values()
-                    .enumerate()
-                    .map(|(i, meal)| {
-                        if i == state.meal_picker_sate.selection_index {
-                            text(format!("> {}", &meal.name))
-                        } else {
-                            text(&meal.name)
-                        }
-                        .into()
-                    })
-                    .collect(),
-            )
-        } else {
-            col(state
-                .meal_picker_sate
-                .search_results
-                .iter()
-                .enumerate()
-                .flat_map(|(i, result)| higlight_search_result(state, result, i))
-                .map(|row| row.into())
-                .collect())
-        };
+fn meal_picker_view(state: &State) -> Column<'_, Message, Renderer<Theme>> {
+    let results: Vec<(_, Element<_>)> = if state.meal_picker_sate.search_results.is_empty() {
+        state
+            .meals
+            .iter()
+            .enumerate()
+            .map(|(i, (id, meal))| {
+                (
+                    Some(id),
+                    if i == state.meal_picker_sate.selection_index {
+                        text(format!("> {}", &meal.name))
+                    } else {
+                        text(&meal.name)
+                    }
+                    .into(),
+                )
+            })
+            .collect()
+    } else {
+        state
+            .meal_picker_sate
+            .search_results
+            .iter()
+            .enumerate()
+            .flat_map(|(i, result)| {
+                higlight_search_result(state, result, i).map(|content| (result, content))
+            })
+            .map(|(result, row)| {
+                (
+                    state.meal_picker_sate.searched_meal_ids.get(result.index),
+                    row.into(),
+                )
+            })
+            .collect()
+    };
+
+    let result_buttons = col(results
+        .into_iter()
+        .map(|(id, ele)| {
+            button(ele)
+                .on_press(Message::MealPickerSubmit(id.copied()))
+                .into()
+        })
+        .collect());
+    //     col::<Message, Renderer<Theme>>(
+    //     .collect(),
+    // );
+
+    let selected_id = if !state.meal_picker_sate.search_results.is_empty() {
+        state
+            .meal_picker_sate
+            .search_results
+            .get(state.meal_picker_sate.selection_index)
+            .and_then(|result| state.meal_picker_sate.searched_meal_ids.get(result.index))
+            .and_then(|id| {
+                if state.meals.contains_key(id) {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+    } else {
+        state
+            .meals
+            .keys()
+            .nth(state.meal_picker_sate.selection_index)
+            .copied()
+    };
 
     col![
         text_input("Search", &state.meal_picker_sate.input_field)
             .on_input(Message::MealPickerInput)
-            .on_submit(Message::MealPickerSubmit)
+            .on_submit(Message::MealPickerSubmit(selected_id))
             .id(MEAL_PICKER_INPUT_ID.clone()),
-        results
+        result_buttons
     ]
     .spacing(30)
 }
@@ -915,7 +963,7 @@ fn higlight_search_result<'a>(
         }
     }));
 
-    Some(row(text_substrings).into())
+    Some(row(text_substrings))
 }
 
 fn bar_view<'a>() -> Row<'a, Message, Renderer<Theme>> {

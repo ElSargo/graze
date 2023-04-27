@@ -73,10 +73,10 @@ impl iced::widget::button::StyleSheet for HeaderButtonStyle {
     }
 }
 
-pub fn header_button<'a>(
+pub fn header_button<'state>(
     content: &str,
     style: impl iced::widget::button::StyleSheet<Style = Theme> + 'static,
-) -> widget::Button<'a, Message, Renderer<Theme>> {
+) -> widget::Button<'state, Message, Renderer<Theme>> {
     button(text(content).size(20)).style(theme::Button::Custom(Box::new(style)))
 }
 
@@ -101,7 +101,7 @@ pub fn delete_icon() -> Text<'static> {
     icon('\u{F1F8}')
 }
 
-pub fn delete_button<'a>() -> widget::Button<'a, Message, Renderer<Theme>> {
+pub fn delete_button<'state>() -> widget::Button<'state, Message, Renderer<Theme>> {
     button(delete_icon()).style(theme::Button::Custom(Box::new(DeleteButtonStyle)))
 }
 
