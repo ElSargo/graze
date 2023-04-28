@@ -64,27 +64,72 @@ impl<T> GenerationalMap<T> {
             })
     }
 
-    pub const fn iter(&self) -> GenerationalIterator<'_, T> {
-        GenerationalIterator {
-            host: self,
-            index: 0,
-        }
+    pub fn iter(&self) -> impl Iterator<Item = (GenerationalKey, &'_ T)> {
+        self.data
+            .iter()
+            .enumerate()
+            .filter_map(|(index, (generation, wraped_item))| {
+                wraped_item.as_ref().and_then(|item| {
+                    Some((
+                        GenerationalKey {
+                            index,
+                            generation: *generation,
+                        },
+                        item,
+                    ))
+                })
+            })
+    }
+
+    #[allow(dead_code)]
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (GenerationalKey, &'_ mut T)> {
+        self.data
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(index, (generation, wraped_item))| {
+                wraped_item.as_mut().and_then(|item| {
+                    Some((
+                        GenerationalKey {
+                            index,
+                            generation: *generation,
+                        },
+                        item,
+                    ))
+                })
+            })
     }
 
     pub fn keys(&self) -> impl Iterator<Item = GenerationalKey> + '_ {
-        GenerationalIterator {
-            host: self,
-            index: 0,
-        }
-        .map(|(key, _item)| key)
+        self.data
+            .iter()
+            .enumerate()
+            .filter_map(|(index, (generation, wraped_item))| {
+                wraped_item.as_ref().and_then(|_| {
+                    Some(GenerationalKey {
+                        index,
+                        generation: *generation,
+                    })
+                })
+            })
     }
 
     pub fn values(&self) -> impl Iterator<Item = &T> {
-        GenerationalIterator {
-            host: self,
-            index: 0,
-        }
-        .map(|(_key, item)| item)
+        self.data
+            .iter()
+            .enumerate()
+            .filter_map(|(_index, (_generation, wraped_item))| {
+                wraped_item.as_ref().and_then(|item| Some(item))
+            })
+    }
+
+    #[allow(dead_code)]
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.data
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(_index, (_generation, wraped_item))| {
+                wraped_item.as_mut().and_then(|item| Some(item))
+            })
     }
 
     #[allow(dead_code)]
@@ -92,35 +137,6 @@ impl<T> GenerationalMap<T> {
         Self {
             data: vec![],
             free: vec![],
-        }
-    }
-}
-
-pub struct GenerationalIterator<'a, T> {
-    host: &'a GenerationalMap<T>,
-    index: usize,
-}
-
-impl<'a, T> Iterator for GenerationalIterator<'a, T> {
-    type Item = (GenerationalKey, &'a T);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            println!("{}", self.index);
-            if let Some((generation, Some(item))) = match self.host.data.get(self.index) {
-                None => return None,
-                Some((generation, item)) => Some((generation, item.as_ref())),
-            } {
-                self.index += 1;
-                return Some((
-                    GenerationalKey {
-                        generation: *generation,
-                        index: self.index - 1,
-                    },
-                    item,
-                ));
-            }
-            self.index += 1;
         }
     }
 }
