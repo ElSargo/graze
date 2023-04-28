@@ -8,9 +8,10 @@
     clippy::absurd_extreme_comparisons,
     clippy::nursery
 )]
-
+mod generational_map;
 use bincode::{deserialize, serialize};
 use fuse_rust::{Fuse, SearchResult};
+use generational_map::{GenerationalKey, GenerationalMap};
 use iced::{
     event, keyboard, subscription,
     theme::{self, Theme},
@@ -23,7 +24,6 @@ use iced::{
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use sha3::{Digest, Sha3_256};
 use std::{
     collections::BTreeMap,
     fmt::Display,
@@ -55,14 +55,13 @@ enum AppState {
 }
 
 type Date = usize;
-type MealId = [u8; 32];
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct State {
     page: Page,
     stack: Vec<Page>,
     days: BTreeMap<Date, Day>,
-    meals: BTreeMap<MealId, Meal>,
+    meals: GenerationalMap<Meal>,
     meal_creation_input_field: String,
     save: SaveState,
     meal_picker_sate: MealPickerState,
@@ -71,9 +70,9 @@ pub struct State {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct MealPickerState {
     input_field: String,
-    selected_id: Option<MealId>,
+    selected_id: Option<GenerationalKey>,
     search_results: Vec<SearchResultPlus>,
-    searched_meal_ids: Vec<MealId>,
+    searched_meal_ids: Vec<GenerationalKey>,
     selection_index: usize,
 }
 
@@ -161,7 +160,7 @@ pub enum Page {
     DayView(Date),
     MealList,
     MealPicker,
-    MealEditorView(MealId),
+    MealEditorView(GenerationalKey),
     ShoppingView {
         from: Date,
         until: Date,
@@ -175,21 +174,21 @@ pub enum Message {
     AddDay,
     AddMeal,
     AddMealIngrediant {
-        meal_id: MealId,
+        meal_id: GenerationalKey,
         new_ingrediant_name: String,
         new_ingrediant_quantity: f64,
         new_unit: Unit,
     },
-    AddMealToDay(Date, MealId),
+    AddMealToDay(Date, GenerationalKey),
     BackPage,
     ChangeToPage(Page),
     Loaded(State),
     MealPickerInput(String),
-    MealPickerSubmit(Option<MealId>),
+    MealPickerSubmit(Option<GenerationalKey>),
     None,
-    RemoveMeal(MealId),
+    RemoveMeal(GenerationalKey),
     RemoveMealIngrediant {
-        meal_name_id: MealId,
+        meal_name_id: GenerationalKey,
         ingrediant_idx: usize,
     },
     Saved(bool),
@@ -198,7 +197,7 @@ pub enum Message {
         shift: bool,
     },
     UpdateMealIngrediant {
-        meal_name_id: MealId,
+        meal_name_id: GenerationalKey,
         ingrediant_idx: usize,
         field: IngrediantField,
     },
@@ -241,10 +240,10 @@ impl State {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Day {
     date: Date,
-    meals: Vec<MealId>,
+    meals: Vec<GenerationalKey>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct Meal {
     name: String,
     ingrediants: Vec<Ingrediant>,
@@ -413,7 +412,7 @@ fn update_ui(state: &mut State, message: Message) -> Command<Message> {
             Command::none()
         }
         Message::RemoveMeal(id) => {
-            state.meals.remove(&id);
+            state.meals.remove(id);
             Command::none()
         }
         Message::TabPressed { shift } => {
@@ -459,12 +458,12 @@ fn on_message_vertical_movement(offset: isize, state: &mut State) -> Command<Mes
 
 fn on_message_add_meal_ingrediant(
     state: &mut State,
-    meal_name: [u8; 32],
+    meal_name: GenerationalKey,
     new_ingrediant_name: String,
     new_ingrediant_quantity: f64,
     new_unit: Unit,
 ) -> Command<Message> {
-    if let Some(meal) = state.meals.get_mut(&meal_name) {
+    if let Some(meal) = state.meals.get_mut(meal_name) {
         meal.ingrediants.push(Ingrediant {
             name: new_ingrediant_name,
             quantity: new_ingrediant_quantity,
@@ -475,7 +474,11 @@ fn on_message_add_meal_ingrediant(
     Command::none()
 }
 
-fn on_message_add_meal_to_day(state: &mut State, date: usize, id: [u8; 32]) -> Command<Message> {
+fn on_message_add_meal_to_day(
+    state: &mut State,
+    date: usize,
+    id: GenerationalKey,
+) -> Command<Message> {
     match state.days.get_mut(&date) {
         Some(day) => day.meals.push(id),
         None => {
@@ -517,23 +520,20 @@ fn on_message_change_page(page: Page, state: &mut State) -> Command<Message> {
 
 fn on_message_remove_meal_ingrediant(
     state: &mut State,
-    meal_name_hash: [u8; 32],
+    meal_name_hash: GenerationalKey,
     ingrediant_idx: usize,
 ) -> Command<Message> {
-    if let Some(meal) = state.meals.get_mut(&meal_name_hash) {
+    if let Some(meal) = state.meals.get_mut(meal_name_hash) {
         meal.ingrediants.remove(ingrediant_idx);
     }
     Command::none()
 }
 
 fn on_message_add_meal(state: &mut State) -> Command<Message> {
-    state.meals.insert(
-        hash_str(&state.meal_creation_input_field),
-        Meal {
-            name: state.meal_creation_input_field.clone(),
-            ingrediants: Vec::new(),
-        },
-    );
+    state.meals.push(Meal {
+        name: state.meal_creation_input_field.clone(),
+        ingrediants: Vec::new(),
+    });
     state.meal_creation_input_field = String::new();
     Command::none()
 }
@@ -546,7 +546,7 @@ fn on_message_meal_picker_input(state: &mut State, input: String) -> Command<Mes
     state.meal_picker_sate.search_results = if state.meal_picker_sate.input_field.is_empty() {
         Vec::new()
     } else {
-        state.meal_picker_sate.searched_meal_ids = state.meals.keys().copied().collect();
+        state.meal_picker_sate.searched_meal_ids = state.meals.keys().collect();
         searcher
             .search_text_in_iterable(
                 &state.meal_picker_sate.input_field,
@@ -562,11 +562,11 @@ fn on_message_meal_picker_input(state: &mut State, input: String) -> Command<Mes
 
 fn on_message_update_meal_ingrediant(
     state: &mut State,
-    meal_name_hash: [u8; 32],
+    meal_id: GenerationalKey,
     ingrediant_idx: usize,
     field: IngrediantField,
 ) -> Command<Message> {
-    if let Some(meal) = state.meals.get_mut(&meal_name_hash) {
+    if let Some(meal) = state.meals.get_mut(meal_id) {
         if let Some(Ingrediant {
             name,
             quantity,
@@ -619,7 +619,7 @@ fn shopping_view<'a>(
     }
     let mut list: BTreeMap<&String, f64> = BTreeMap::new();
     for (meal_name, count) in meals_and_count {
-        if let Some(meal) = state.meals.get(&meal_name) {
+        if let Some(meal) = state.meals.get(meal_name) {
             for Ingrediant {
                 name,
                 quantity,
@@ -652,9 +652,9 @@ fn shopping_view<'a>(
 
 fn meal_editor<'a>(
     state: &'a State,
-    meal_id: &'a [u8; 32],
+    meal_id: &'a GenerationalKey,
 ) -> Column<'a, Message, Renderer<Theme>> {
-    state.meals.get(meal_id).map_or_else(
+    state.meals.get(*meal_id).map_or_else(
         || col![Element::<_>::from(text("Meal not found"))],
         |meal| {
             let (delete_buttons, edit_name, edit_quantity, quantity_was_parsed, edit_unit) = meal
@@ -729,7 +729,7 @@ fn meal_editor<'a>(
                 text(
                     state
                         .meals
-                        .get(meal_id)
+                        .get(*meal_id)
                         .map_or("Unknown Meal", |meal| &meal.name)
                 ),
                 row![
@@ -771,7 +771,7 @@ fn day_view<'a>(state: &State, date: Date) -> Column<'a, Message, Renderer<Theme
                         |id| {
                             let meal_name = state
                                 .meals
-                                .get(&id)
+                                .get(id)
                                 .map_or("Meal not found", |meal| &meal.name);
                             row![
                                 button(text(format!("selected: {meal_name}")))
@@ -788,7 +788,7 @@ fn day_view<'a>(state: &State, date: Date) -> Column<'a, Message, Renderer<Theme
                         button(text(
                             state
                                 .meals
-                                .get(id)
+                                .get(*id)
                                 .map_or("meal not found", |meal| meal.name.as_str()),
                         ))
                         .on_press(Message::ChangeToPage(Page::MealEditorView(*id)))
@@ -802,13 +802,13 @@ fn day_view<'a>(state: &State, date: Date) -> Column<'a, Message, Renderer<Theme
 
 fn meal_list_view<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
     let mut list = Vec::with_capacity(state.meals.len());
-    for (id, meal) in &state.meals {
+    for (id, meal) in state.meals.iter() {
         list.push(
             container(
                 row![
-                    button(text(meal.name.as_str()).size(30)).width(Length::Fill),
-                    button(edit_icon()).on_press(Message::ChangeToPage(Page::MealEditorView(*id))),
-                    delete_button().on_press(Message::RemoveMeal(*id))
+                    button(text(meal.name.as_str()).size(20)).width(Length::Fill),
+                    button(edit_icon()).on_press(Message::ChangeToPage(Page::MealEditorView(id))),
+                    delete_button().on_press(Message::RemoveMeal(id))
                 ]
                 .spacing(5),
             )
@@ -829,15 +829,6 @@ fn meal_list_view<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
         .spacing(10),
     ]
     .spacing(10)
-}
-
-fn hash_str(s: &str) -> MealId {
-    let mut hasher = Sha3_256::new();
-    hasher.update(s);
-    let data: Vec<_> = hasher.finalize().into_iter().collect();
-    let mut slice: [u8; 32] = [0; 32];
-    slice.copy_from_slice(&data[0..32]);
-    slice
 }
 
 fn week_view<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
@@ -899,7 +890,11 @@ fn meal_picker_view(state: &State) -> Column<'_, Message, Renderer<Theme>> {
             })
             .map(|(result, row)| {
                 (
-                    state.meal_picker_sate.searched_meal_ids.get(result.index),
+                    state
+                        .meal_picker_sate
+                        .searched_meal_ids
+                        .get(result.index)
+                        .copied(),
                     row.into(),
                 )
             })
@@ -908,11 +903,7 @@ fn meal_picker_view(state: &State) -> Column<'_, Message, Renderer<Theme>> {
 
     let result_buttons = col(results
         .into_iter()
-        .map(|(id, ele)| {
-            button(ele)
-                .on_press(Message::MealPickerSubmit(id.copied()))
-                .into()
-        })
+        .map(|(id, ele)| button(ele).on_press(Message::MealPickerSubmit(id)).into())
         .collect());
     //     col::<Message, Renderer<Theme>>(
     //     .collect(),
@@ -923,7 +914,6 @@ fn meal_picker_view(state: &State) -> Column<'_, Message, Renderer<Theme>> {
             .meals
             .keys()
             .nth(state.meal_picker_sate.selection_index)
-            .copied()
     } else {
         state
             .meal_picker_sate
@@ -931,7 +921,7 @@ fn meal_picker_view(state: &State) -> Column<'_, Message, Renderer<Theme>> {
             .get(state.meal_picker_sate.selection_index)
             .and_then(|result| state.meal_picker_sate.searched_meal_ids.get(result.index))
             .and_then(|id| {
-                if state.meals.contains_key(id) {
+                if state.meals.contains_key(*id) {
                     Some(*id)
                 } else {
                     None
@@ -955,7 +945,7 @@ fn higlight_search_result<'a>(
     i: usize,
 ) -> Option<Row<'a, Message, Renderer<Theme>>> {
     let meal_id = state.meal_picker_sate.searched_meal_ids.get(result.index)?;
-    let meal_name = &state.meals.get(meal_id)?.name;
+    let meal_name = &state.meals.get(*meal_id)?.name;
     let mut text_substrings: Vec<Element<Message>> = Vec::new();
     if i == state.meal_picker_sate.selection_index {
         text_substrings.push(text("> ").size(20).into());
