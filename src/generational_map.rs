@@ -115,7 +115,7 @@ impl<'a, T> Iterator for GenerationalIterator<'a, T> {
                 return Some((
                     GenerationalKey {
                         generation: *generation,
-                        index: self.index,
+                        index: self.index - 1,
                     },
                     item,
                 ));
@@ -252,5 +252,44 @@ mod tests {
         assert_eq!(subject.remove(fisrt), Some(20));
         assert_eq!(subject.get_mut(second), Some(&mut 30));
         assert_eq!(subject.remove(second), Some(30));
+    }
+
+    #[test]
+    fn iter() {
+        let mut subject = GenerationalMap::new();
+        subject.push(1);
+        subject.push(2);
+        subject.push(6);
+        let mut iterator = subject.iter();
+        assert_eq!(
+            iterator.next(),
+            Some((
+                GenerationalKey {
+                    index: 0,
+                    generation: 0
+                },
+                &1
+            ))
+        );
+        assert_eq!(
+            iterator.next(),
+            Some((
+                GenerationalKey {
+                    index: 1,
+                    generation: 0
+                },
+                &2
+            ))
+        );
+        assert_eq!(
+            iterator.next(),
+            Some((
+                GenerationalKey {
+                    index: 2,
+                    generation: 0
+                },
+                &6
+            ))
+        );
     }
 }
