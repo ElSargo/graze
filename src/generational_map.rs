@@ -69,14 +69,14 @@ impl<T> GenerationalMap<T> {
             .iter()
             .enumerate()
             .filter_map(|(index, (generation, wraped_item))| {
-                wraped_item.as_ref().and_then(|item| {
-                    Some((
+                wraped_item.as_ref().map(|item| {
+                    (
                         GenerationalKey {
                             index,
                             generation: *generation,
                         },
                         item,
-                    ))
+                    )
                 })
             })
     }
@@ -87,14 +87,14 @@ impl<T> GenerationalMap<T> {
             .iter_mut()
             .enumerate()
             .filter_map(|(index, (generation, wraped_item))| {
-                wraped_item.as_mut().and_then(|item| {
-                    Some((
+                wraped_item.as_mut().map(|item| {
+                    (
                         GenerationalKey {
                             index,
                             generation: *generation,
                         },
                         item,
-                    ))
+                    )
                 })
             })
     }
@@ -104,11 +104,9 @@ impl<T> GenerationalMap<T> {
             .iter()
             .enumerate()
             .filter_map(|(index, (generation, wraped_item))| {
-                wraped_item.as_ref().and_then(|_| {
-                    Some(GenerationalKey {
-                        index,
-                        generation: *generation,
-                    })
+                wraped_item.as_ref().map(|_| GenerationalKey {
+                    index,
+                    generation: *generation,
                 })
             })
     }
@@ -117,9 +115,7 @@ impl<T> GenerationalMap<T> {
         self.data
             .iter()
             .enumerate()
-            .filter_map(|(_index, (_generation, wraped_item))| {
-                wraped_item.as_ref().and_then(|item| Some(item))
-            })
+            .filter_map(|(_index, (_generation, wraped_item))| wraped_item.as_ref())
     }
 
     #[allow(dead_code)]
@@ -127,9 +123,7 @@ impl<T> GenerationalMap<T> {
         self.data
             .iter_mut()
             .enumerate()
-            .filter_map(|(_index, (_generation, wraped_item))| {
-                wraped_item.as_mut().and_then(|item| Some(item))
-            })
+            .filter_map(|(_index, (_generation, wraped_item))| wraped_item.as_mut())
     }
 
     #[allow(dead_code)]

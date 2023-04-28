@@ -1,13 +1,4 @@
-#![forbid(
-    clippy::suspicious,
-    clippy::complexity,
-    clippy::correctness,
-    clippy::pedantic,
-    clippy::style,
-    clippy::perf,
-    clippy::absurd_extreme_comparisons,
-    clippy::nursery
-)]
+#![forbid(clippy::all, clippy::pedantic, clippy::nursery)]
 mod generational_map;
 use bincode::{deserialize, serialize};
 use fuse_rust::{Fuse, SearchResult};
@@ -155,23 +146,25 @@ struct SaveState {
     saving: bool,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Page {
     DayView(Date),
     MealList,
     MealPicker,
     MealEditorView(GenerationalKey),
-    ShoppingView {
-        from: Date,
-        until: Date,
-    },
-    #[default]
-    WeekView,
+    ShoppingView { from: Date, until: Date },
+    WeekView(Range<Date>),
+}
+
+impl Default for Page {
+    fn default() -> Self {
+        Self::WeekView(0..100)
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    AddDay,
+    AddDay(Date),
     AddMeal,
     AddMealIngrediant {
         meal_id: GenerationalKey,
@@ -301,8 +294,8 @@ impl Application for AppState {
                 let page = match &state.page {
                     Page::MealList => meal_list_view(state),
                     Page::DayView(date) => day_view(state, *date),
-                    Page::MealEditorView(meal_id) => meal_editor(state, meal_id),
-                    Page::WeekView => week_view(state),
+                    Page::MealEditorView(meal_id) => meal_editor_view(state, meal_id),
+                    Page::WeekView(range) => week_view(state, range),
                     Page::ShoppingView { from, until } => shopping_view(state, *from, *until),
                     Page::MealPicker => meal_picker_view(state),
                 };
@@ -373,7 +366,7 @@ fn update_ui(state: &mut State, message: Message) -> Command<Message> {
             ingrediant_idx,
         } => on_message_remove_meal_ingrediant(state, meal_name_hash, ingrediant_idx),
         Message::ChangeToPage(page) => on_message_change_page(page, state),
-        Message::AddDay => on_message_add_day(state),
+        Message::AddDay(date) => on_message_add_day(state, date),
         Message::AddMealToDay(date, id) => on_message_add_meal_to_day(state, date, id),
         Message::BackPage => {
             back_page(state);
@@ -494,11 +487,11 @@ fn on_message_add_meal_to_day(
     Command::none()
 }
 
-fn on_message_add_day(state: &mut State) -> Command<Message> {
+fn on_message_add_day(state: &mut State, date: Date) -> Command<Message> {
     state.days.insert(
-        state.days.len(),
+        date,
         Day {
-            date: state.days.len(),
+            date,
             meals: Vec::new(),
         },
     );
@@ -650,7 +643,7 @@ fn shopping_view<'a>(
     ]
 }
 
-fn meal_editor<'a>(
+fn meal_editor_view<'a>(
     state: &'a State,
     meal_id: &'a GenerationalKey,
 ) -> Column<'a, Message, Renderer<Theme>> {
@@ -831,33 +824,55 @@ fn meal_list_view<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
     .spacing(10)
 }
 
-fn week_view<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
+fn week_view<'a>(state: &State, range: &Range<Date>) -> Column<'a, Message, Renderer<Theme>> {
+    // let today = 0;
     let mut weeks = Vec::new();
     let mut week = Vec::new();
     let mut push_week = |week| {
         weeks.push(
-            container(col(week).spacing(5))
-                .style(theme::Container::Box)
-                .padding(5)
-                .into(),
+            container(
+                container(col(week).spacing(5))
+                    .style(theme::Container::Box)
+                    .padding(5)
+                    .width(Length::Fill),
+            )
+            .padding(20)
+            .width(Length::Fill)
+            .into(),
         );
     };
-    for (date, day) in &state.days {
+    for date in range.clone() {
+        week.push(state.days.get(&date).map_or_else(
+            || {
+                container(row![
+                    text(format!("Day {date}")),
+                    button("+").on_press(Message::AddDay(date))
+                ])
+                .style(theme::Container::Box)
+                .into()
+            },
+            |day| {
+                container(
+                    button(text(format!(
+                        "Day {date}: {} meals addded",
+                        day.meals.len()
+                    )))
+                    .on_press(Message::ChangeToPage(Page::DayView(date))),
+                )
+                .style(theme::Container::Box)
+                .into()
+            },
+        ));
         if date % 7 == 0 && !week.is_empty() {
             push_week(take(&mut week));
             continue;
         }
-
-        week.push(
-            button(text(format!(
-                "Day {date}: {} meals addded",
-                day.meals.len()
-            )))
-            .on_press(Message::ChangeToPage(Page::DayView(*date)))
-            .into(),
-        );
     }
-    push_week(week);
+
+    // if !week.is_empty() {
+    //     push_week(week);
+    // }
+
     col(weeks).spacing(10)
 }
 
@@ -981,7 +996,8 @@ fn bar_view<'a>() -> Row<'a, Message, Renderer<Theme>> {
     row![
         header_button("Back", BackButtonStyle).on_press(Message::BackPage),
         col![].width(Length::FillPortion(1)),
-        header_button("Week", HeaderButtonStyle).on_press(Message::ChangeToPage(Page::WeekView)),
+        header_button("Week", HeaderButtonStyle)
+            .on_press(Message::ChangeToPage(Page::WeekView(0..100))),
         col![].width(Length::FillPortion(1)),
         header_button("List", HeaderButtonStyle).on_press(Message::ChangeToPage(
             Page::ShoppingView {
