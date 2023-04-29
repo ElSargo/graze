@@ -111,14 +111,28 @@ static UNITS: &[Unit] = &[
 
 impl Unit {
     fn to_grams(self, quantity: f64) -> f64 {
-        quantity
-            * match self {
-                Self::Grams | Self::MilliLiters => 1.0,
-                Self::KiloGrams | Self::Liters => 1000.0,
-                Self::TeaSpoon => 4.2,
-                Self::TableSpoon => 13.0,
-                Self::Pinch => 0.3,
-            }
+        quantity * self.in_grams()
+    }
+
+    const fn is_liquid(self) -> bool {
+        match self {
+            Self::Liters | Self::MilliLiters => true,
+            _ => false,
+        }
+    }
+
+    const fn in_grams(self) -> f64 {
+        match self {
+            Self::Grams | Self::MilliLiters => 1.0,
+            Self::KiloGrams | Self::Liters => 1000.0,
+            Self::TeaSpoon => 4.2,
+            Self::TableSpoon => 13.0,
+            Self::Pinch => 0.3,
+        }
+    }
+
+    fn from_grams(self, quantity: f64) -> f64 {
+        quantity / self.in_grams()
     }
 
     const fn abreviation(self) -> &'static str {
@@ -126,10 +140,26 @@ impl Unit {
             Self::Grams => "g",
             Self::KiloGrams => "kg",
             Self::MilliLiters => "ml",
-            Self::Liters => "l",
+            Self::Liters => "L",
             Self::TeaSpoon => "tsp",
             Self::TableSpoon => "tbsp",
             Self::Pinch => "pinch",
+        }
+    }
+}
+
+fn apropriate_unit(grams: f64, is_liquid: bool) -> (f64, Unit) {
+    if is_liquid {
+        if grams < Unit::Liters.in_grams() {
+            (grams, Unit::MilliLiters)
+        } else {
+            (Unit::Liters.from_grams(grams), Unit::Liters)
+        }
+    } else {
+        if grams < Unit::KiloGrams.in_grams() {
+            (grams, Unit::Grams)
+        } else {
+            (Unit::KiloGrams.from_grams(grams), Unit::KiloGrams)
         }
     }
 }
@@ -158,7 +188,7 @@ pub enum Page {
 
 impl Default for Page {
     fn default() -> Self {
-        Self::WeekView(0..100)
+        Self::WeekView(1..100)
     }
 }
 
@@ -300,7 +330,7 @@ impl Application for AppState {
                     Page::MealPicker => meal_picker_view(state),
                 };
 
-                col![bar_view(), scrollable(page)]
+                col![bar_view(state), scrollable(page)]
                     .height(Length::Fill)
                     .width(Length::Fill)
                     .spacing(10)
@@ -610,7 +640,7 @@ fn shopping_view<'a>(
             }
         }
     }
-    let mut list: BTreeMap<&String, f64> = BTreeMap::new();
+    let mut list: BTreeMap<&String, (f64, bool)> = BTreeMap::new();
     for (meal_name, count) in meals_and_count {
         if let Some(meal) = state.meals.get(meal_name) {
             for Ingrediant {
@@ -623,11 +653,12 @@ fn shopping_view<'a>(
                 let ammount = unit.to_grams(quantity * count);
                 #[allow(clippy::option_if_let_else)]
                 match list.get_mut(&name) {
-                    Some(total) => {
+                    Some((total, is_liquid)) => {
                         *total += ammount;
+                        *is_liquid = *is_liquid && unit.is_liquid()
                     }
                     None => {
-                        list.insert(name, ammount);
+                        list.insert(name, (ammount, unit.is_liquid()));
                     }
                 };
             }
@@ -638,7 +669,14 @@ fn shopping_view<'a>(
         text("Shopping"),
         col(list
             .iter()
-            .map(|(name, ammount)| text(format!("{name}: {ammount}")).into())
+            .map(|(name, (ammount, is_liquid))| {
+                let (new_ammount, unit) = apropriate_unit(*ammount, *is_liquid);
+                text(format!(
+                    "{name}: {} {unit}",
+                    (new_ammount * 10.).round() / 10.
+                ))
+                .into()
+            })
             .collect())
     ]
 }
@@ -751,7 +789,7 @@ fn day_view<'a>(state: &State, date: Date) -> Column<'a, Message, Renderer<Theme
         || col![text("Day is invalid")],
         |day| {
             col![
-                text(format!("Day {date}")),
+                text(format!("Day {date}")).size(30),
                 {
                     state.meal_picker_sate.selected_id.map_or_else(
                         || {
@@ -825,19 +863,22 @@ fn meal_list_view<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
 }
 
 fn week_view<'a>(state: &State, range: &Range<Date>) -> Column<'a, Message, Renderer<Theme>> {
-    // let today = 0;
+    let mut week_start = range.start;
     let mut weeks = Vec::new();
     let mut week = Vec::new();
-    let mut push_week = |week| {
+    let mut push_week = |week, week_start| {
         weeks.push(
-            container(
-                container(col(week).spacing(5))
-                    .style(theme::Container::Box)
-                    .padding(5)
-                    .width(Length::Fill),
-            )
-            .padding(20)
-            .width(Length::Fill)
+            col![
+                text(format!("Week {}", week_start / 7)).size(30),
+                container(
+                    container(col(week).spacing(5))
+                        .style(theme::Container::Box)
+                        .padding(5)
+                        .width(Length::Fill),
+                )
+                .padding(20)
+                .width(Length::Fill)
+            ]
             .into(),
         );
     };
@@ -864,11 +905,11 @@ fn week_view<'a>(state: &State, range: &Range<Date>) -> Column<'a, Message, Rend
             },
         ));
         if date % 7 == 0 && !week.is_empty() {
-            push_week(take(&mut week));
+            push_week(take(&mut week), week_start);
+            week_start = date;
             continue;
         }
     }
-
     // if !week.is_empty() {
     //     push_week(week);
     // }
@@ -992,21 +1033,41 @@ fn higlight_search_result<'a>(
     Some(row(text_substrings))
 }
 
-fn bar_view<'a>() -> Row<'a, Message, Renderer<Theme>> {
+fn bar_view<'a>(state: &'a State) -> Row<'a, Message, Renderer<Theme>> {
+    let on_press_and = |button: widget::Button<'a, Message, _>, message, predicate| {
+        if predicate {
+            button.on_press(message)
+        } else {
+            button
+        }
+    };
     row![
-        header_button("Back", BackButtonStyle).on_press(Message::BackPage),
+        on_press_and(
+            header_button("Back", BackButtonStyle),
+            Message::BackPage,
+            !state.stack.is_empty()
+        ),
         col![].width(Length::FillPortion(1)),
-        header_button("Week", HeaderButtonStyle)
-            .on_press(Message::ChangeToPage(Page::WeekView(0..100))),
+        on_press_and(
+            header_button("Week", HeaderButtonStyle),
+            Message::ChangeToPage(Page::WeekView(1..100)),
+            !matches!(state.page, Page::WeekView(_))
+        ),
         col![].width(Length::FillPortion(1)),
-        header_button("List", HeaderButtonStyle).on_press(Message::ChangeToPage(
-            Page::ShoppingView {
+        on_press_and(
+            header_button("List", HeaderButtonStyle),
+            Message::ChangeToPage(Page::ShoppingView {
                 from: 0,
                 until: 100
-            }
-        )),
+            }),
+            !matches!(state.page, Page::ShoppingView { .. })
+        ),
         col![].width(Length::FillPortion(1)),
-        header_button("Meals", HeaderButtonStyle).on_press(Message::ChangeToPage(Page::MealList)),
+        on_press_and(
+            header_button("Meals", HeaderButtonStyle),
+            Message::ChangeToPage(Page::MealList),
+            !matches!(state.page, Page::MealList)
+        ),
         col![].width(Length::FillPortion(1)),
         header_button("Calender", HeaderButtonStyle),
     ]
