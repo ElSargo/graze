@@ -785,50 +785,48 @@ fn meal_editor_view<'a>(
 }
 
 fn day_view<'a>(state: &State, date: Date) -> Column<'a, Message, Renderer<Theme>> {
-    state.days.get(&date).map_or_else(
-        || col![text("Day is invalid")],
-        |day| {
-            col![
-                text(format!("Day {date}")).size(30),
-                {
-                    state.meal_picker_sate.selected_id.map_or_else(
-                        || {
-                            row![
-                                button(text("select: ",))
-                                    .on_press(Message::ChangeToPage(Page::MealPicker)),
-                                button("Submit")
-                            ]
-                        },
-                        |id| {
-                            let meal_name = state
-                                .meals
-                                .get(id)
-                                .map_or("Meal not found", |meal| &meal.name);
-                            row![
-                                button(text(format!("selected: {meal_name}")))
-                                    .on_press(Message::ChangeToPage(Page::MealPicker)),
-                                button("Submit").on_press(Message::AddMealToDay(date, id))
-                            ]
-                        },
-                    )
-                },
-                col(day
+    let Some(day )= state.days.get(&date) else {
+         return col!["Day not found"]
+    };
+    let days = day
+        .meals
+        .iter()
+        .map(|id| {
+            button(text(
+                state
                     .meals
-                    .iter()
-                    .map(|id| {
-                        button(text(
-                            state
-                                .meals
-                                .get(*id)
-                                .map_or("meal not found", |meal| meal.name.as_str()),
-                        ))
-                        .on_press(Message::ChangeToPage(Page::MealEditorView(*id)))
-                        .into()
-                    })
-                    .collect()),
+                    .get(*id)
+                    .map_or("meal not found", |meal| meal.name.as_str()),
+            ))
+            .on_press(Message::ChangeToPage(Page::MealEditorView(*id)))
+            .into()
+        })
+        .collect();
+    let adder_widget = state.meal_picker_sate.selected_id.map_or_else(
+        || {
+            row![
+                button(text("select: ",)).on_press(Message::ChangeToPage(Page::MealPicker)),
+                button("Submit")
             ]
         },
-    )
+        |id| {
+            let meal_name = state
+                .meals
+                .get(id)
+                .map_or("Meal not found", |meal| &meal.name);
+            row![
+                button(text(format!("selected: {meal_name}")))
+                    .on_press(Message::ChangeToPage(Page::MealPicker)),
+                button("Submit").on_press(Message::AddMealToDay(date, id))
+            ]
+        },
+    );
+
+    col![
+        text(format!("Day {date}")).size(30),
+        adder_widget,
+        col(days),
+    ]
 }
 
 fn meal_list_view<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
