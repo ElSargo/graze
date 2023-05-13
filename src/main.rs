@@ -23,7 +23,9 @@ use std::{
     time::Duration,
 };
 mod styles;
-use styles::{delete_button, edit_icon, header_button, BackButtonStyle, HeaderButtonStyle};
+use styles::{
+    delete_button, edit_icon, header_button, switch_button, BackButtonStyle, HeaderButtonStyle,
+};
 
 fn main() {
     AppState::run(Settings {
@@ -33,7 +35,7 @@ fn main() {
         },
         ..Default::default()
     })
-    .expect("App crashed");
+    .expect("App couldn't start");
 }
 
 static MEAL_ADDER_INPUT_ID: Lazy<text_input::Id> = Lazy::new(text_input::Id::unique);
@@ -210,6 +212,7 @@ pub enum Message {
     MealPickerSubmit(Option<GenerationalKey>),
     None,
     RemoveMeal(GenerationalKey),
+    RemoveMealFromDay(usize),
     RemoveMealIngrediant {
         meal_name_id: GenerationalKey,
         ingrediant_idx: usize,
@@ -791,42 +794,61 @@ fn day_view<'a>(state: &State, date: Date) -> Column<'a, Message, Renderer<Theme
     let days = day
         .meals
         .iter()
-        .map(|id| {
-            button(text(
-                state
-                    .meals
-                    .get(*id)
-                    .map_or("meal not found", |meal| meal.name.as_str()),
-            ))
-            .on_press(Message::ChangeToPage(Page::MealEditorView(*id)))
+        .enumerate()
+        .map(|(i, id)| {
+            container(
+                row![
+                    text(
+                        state
+                            .meals
+                            .get(*id)
+                            .map_or("meal not found", |meal| meal.name.as_str()),
+                    ),
+                    col![].width(Length::Fill),
+                    button(edit_icon()).on_press(Message::ChangeToPage(Page::MealEditorView(*id))),
+                    delete_button().on_press(Message::RemoveMealFromDay(i))
+                ]
+                .align_items(iced::Alignment::Center)
+                .spacing(10),
+            )
+            .style(theme::Container::Box)
+            .padding(5)
+            .width(Length::Fill)
             .into()
         })
         .collect();
-    let adder_widget = state.meal_picker_sate.selected_id.map_or_else(
-        || {
-            row![
-                button(text("select: ",)).on_press(Message::ChangeToPage(Page::MealPicker)),
-                button("Submit")
-            ]
-        },
+    let (selected_meal_text, submit_button) = state.meal_picker_sate.selected_id.map_or_else(
+        || (text("None"), button("Add")),
         |id| {
             let meal_name = state
                 .meals
                 .get(id)
                 .map_or("Meal not found", |meal| &meal.name);
-            row![
-                button(text(format!("selected: {meal_name}")))
-                    .on_press(Message::ChangeToPage(Page::MealPicker)),
-                button("Submit").on_press(Message::AddMealToDay(date, id))
-            ]
+            (
+                text(format!("selected: {meal_name}")),
+                button("Submit").on_press(Message::AddMealToDay(date, id)),
+            )
         },
     );
+    let adder_widget = container(
+        row![
+            switch_button().on_press(Message::ChangeToPage(Page::MealPicker)),
+            selected_meal_text,
+            col![].width(Length::Fill),
+            submit_button
+        ]
+        .spacing(10)
+        .align_items(iced::Alignment::Center),
+    )
+    .style(theme::Container::Box)
+    .width(Length::Fill);
 
     col![
         text(format!("Day {date}")).size(30),
         adder_widget,
-        col(days),
+        col(days).spacing(10),
     ]
+    .spacing(10)
 }
 
 fn meal_list_view<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
@@ -885,6 +907,7 @@ fn week_view<'a>(state: &State, range: &Range<Date>) -> Column<'a, Message, Rend
             || {
                 container(row![
                     text(format!("Day {date}")),
+                    col![].width(Length::Fill),
                     button("+").on_press(Message::AddDay(date))
                 ])
                 .style(theme::Container::Box)
@@ -984,6 +1007,7 @@ fn meal_picker_view(state: &State) -> Column<'_, Message, Renderer<Theme>> {
     };
 
     col![
+        button("New").on_press(Message::ChangeToPage(Page::MealList)),
         text_input("Search", &state.meal_picker_sate.input_field)
             .on_input(Message::MealPickerInput)
             .on_submit(Message::MealPickerSubmit(selected_id))

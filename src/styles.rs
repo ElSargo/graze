@@ -1,5 +1,5 @@
 use iced::{
-    alignment,
+    alignment::{self, Horizontal, Vertical},
     theme::{self, Theme},
     widget::{self, button, text, Text},
     Color, Font, Renderer, Vector,
@@ -79,10 +79,26 @@ pub fn header_button<'state>(
 ) -> widget::Button<'state, Message, Renderer<Theme>> {
     button(text(content).size(20)).style(theme::Button::Custom(Box::new(style)))
 }
+pub fn switch_button() -> widget::Button<'static, Message, Renderer<Theme>> {
+    button(
+        text("⟷")
+            .size(30)
+            .width(20)
+            .height(20)
+            .font(JBM)
+            .horizontal_alignment(Horizontal::Center)
+            .vertical_alignment(Vertical::Center),
+    )
+}
 
-const ICONS: Font = Font::External {
+pub const ICONS: Font = Font::External {
     name: "Icons",
     bytes: include_bytes!("../fonts/icons.ttf"),
+};
+
+pub const JBM: Font = Font::External {
+    name: "JetBrainsMono-Regular",
+    bytes: include_bytes!("../fonts/fonts/ttf/JetBrainsMono-Regular.ttf"),
 };
 
 pub fn icon(unicode: char) -> Text<'static> {
