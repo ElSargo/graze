@@ -931,9 +931,6 @@ fn week_view<'a>(state: &State, range: &Range<Date>) -> Column<'a, Message, Rend
             continue;
         }
     }
-    // if !week.is_empty() {
-    //     push_week(week);
-    // }
 
     col(weeks).spacing(10)
 }
