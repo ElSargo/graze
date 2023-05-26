@@ -99,6 +99,7 @@ pub enum Unit {
     TeaSpoon,
     TableSpoon,
     Pinch,
+    None,
 }
 
 static UNITS: &[Unit] = &[
@@ -109,6 +110,7 @@ static UNITS: &[Unit] = &[
     Unit::TeaSpoon,
     Unit::TableSpoon,
     Unit::Pinch,
+    Unit::None,
 ];
 
 impl Unit {
@@ -130,6 +132,7 @@ impl Unit {
             Self::TeaSpoon => 4.2,
             Self::TableSpoon => 13.0,
             Self::Pinch => 0.3,
+            Self::None => 1.0,
         }
     }
 
@@ -146,6 +149,7 @@ impl Unit {
             Self::TeaSpoon => "tsp",
             Self::TableSpoon => "tbsp",
             Self::Pinch => "pinch",
+            Self::None => "x",
         }
     }
 }
@@ -212,7 +216,10 @@ pub enum Message {
     MealPickerSubmit(Option<GenerationalKey>),
     None,
     RemoveMeal(GenerationalKey),
-    RemoveMealFromDay(usize),
+    RemoveMealFromDay {
+        date: Date,
+        index: usize,
+    },
     RemoveMealIngrediant {
         meal_name_id: GenerationalKey,
         ingrediant_idx: usize,
@@ -344,13 +351,14 @@ impl Application for AppState {
     }
 
     fn theme(&self) -> Self::Theme {
-        self::Theme::custom(theme::Palette {
-            background: Color::from_rgba(0.157, 0.157, 0.157, 1.0),
-            text: Color::from_rgba(0.922, 0.859, 0.698, 1.0),
-            primary: Color::from_rgba(0.271, 0.522, 0.533, 1.0),
-            success: Color::from_rgba(0.722, 0.733, 0.149, 1.0),
-            danger: Color::from_rgba(0.984, 0.286, 0.204, 1.0),
-        })
+        // self::Theme::custom(theme::Palette {
+        //     background: Color::from_rgba(0.157, 0.157, 0.157, 1.0),
+        //     text: Color::from_rgba(0.922, 0.859, 0.698, 1.0),
+        //     primary: Color::from_rgba(0.271, 0.522, 0.533, 1.0),
+        //     success: Color::from_rgba(0.722, 0.733, 0.149, 1.0),
+        //     danger: Color::from_rgba(0.984, 0.286, 0.204, 1.0),
+        // })
+        self::Theme::Light
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -448,10 +456,18 @@ fn update_ui(state: &mut State, message: Message) -> Command<Message> {
                 widget::focus_next()
             }
         }
-        Message::VerticalMovement(movment) if state.page == Page::MealPicker => {
-            on_message_vertical_movement(movment, state)
+        Message::None => Command::none(),
+        Message::RemoveMealFromDay { date, index } => {
+            state.days.get_mut(&date).map(|day| day.meals.remove(index));
+            Command::none()
         }
-        _ => Command::none(),
+        Message::VerticalMovement(movment) => {
+            if state.page == Page::MealPicker {
+                on_message_vertical_movement(movment, state)
+            } else {
+                Command::none()
+            }
+        } // _ => Command::none(),
     };
     let save_com = if state.save.saving || state.save.saved {
         Command::none()
@@ -806,7 +822,7 @@ fn day_view<'a>(state: &State, date: Date) -> Column<'a, Message, Renderer<Theme
                     ),
                     col![].width(Length::Fill),
                     button(edit_icon()).on_press(Message::ChangeToPage(Page::MealEditorView(*id))),
-                    delete_button().on_press(Message::RemoveMealFromDay(i))
+                    delete_button().on_press(Message::RemoveMealFromDay { date, index: i })
                 ]
                 .align_items(iced::Alignment::Center)
                 .spacing(10),
