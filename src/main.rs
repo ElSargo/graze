@@ -1,4 +1,3 @@
-#![forbid(clippy::all, clippy::pedantic, clippy::nursery)]
 mod generational_map;
 use bincode::{deserialize, serialize};
 use fuse_rust::{Fuse, SearchResult};
@@ -119,10 +118,7 @@ impl Unit {
     }
 
     const fn is_liquid(self) -> bool {
-        match self {
-            Self::Liters | Self::MilliLiters => true,
-            _ => false,
-        }
+        matches!(self, Self::Liters | Self::MilliLiters)
     }
 
     const fn in_grams(self) -> f64 {
@@ -136,7 +132,7 @@ impl Unit {
         }
     }
 
-    fn from_grams(self, quantity: f64) -> f64 {
+    fn grams(self, quantity: f64) -> f64 {
         quantity / self.in_grams()
     }
 
@@ -159,14 +155,12 @@ fn apropriate_unit(grams: f64, is_liquid: bool) -> (f64, Unit) {
         if grams < Unit::Liters.in_grams() {
             (grams, Unit::MilliLiters)
         } else {
-            (Unit::Liters.from_grams(grams), Unit::Liters)
+            (Unit::Liters.grams(grams), Unit::Liters)
         }
+    } else if grams < Unit::KiloGrams.in_grams() {
+        (grams, Unit::Grams)
     } else {
-        if grams < Unit::KiloGrams.in_grams() {
-            (grams, Unit::Grams)
-        } else {
-            (Unit::KiloGrams.from_grams(grams), Unit::KiloGrams)
-        }
+        (Unit::KiloGrams.grams(grams), Unit::KiloGrams)
     }
 }
 
