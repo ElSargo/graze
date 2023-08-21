@@ -98,7 +98,7 @@ pub const ICONS: Font = Font::External {
 
 pub const JBM: Font = Font::External {
     name: "JetBrainsMono-Regular",
-    bytes: include_bytes!("../fonts/fonts/ttf/JetBrainsMono-Regular.ttf"),
+    bytes: include_bytes!("../fonts/JetBrainsMono-Regular.ttf"),
 };
 
 pub fn icon(unicode: char) -> Text<'static> {

@@ -18,7 +18,6 @@
         nixpkgs.overlays = [ fenix.overlays.complete ];
         devShells.default = pkgs.mkShell rec {
 
-
           nativeBuildInputs = with pkgs; [
             pkg-config
             cmake
@@ -32,7 +31,6 @@
             rust
             pkgs.lldb_15
             pkgs.sccache
-            pkgs.sccache
             pkgs.udev
             pkgs.alsa-lib
             pkgs.vulkan-loader
@@ -44,6 +42,7 @@
             pkgs.wayland
           ];
           LD_LIBRARY_PATH = nixpkgs.lib.makeLibraryPath buildInputs;
+          shellHook = "ln -s ${pkgs.jetbrains-mono}/share/fonts/truetype/JetBrainsMono-Regular.ttf ./fonts/";
         };
       });
 }
