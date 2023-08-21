@@ -40,6 +40,7 @@
             pkgs.xorg.libXrandr
             pkgs.libxkbcommon
             pkgs.wayland
+            pkgs.mold
           ];
           LD_LIBRARY_PATH = nixpkgs.lib.makeLibraryPath buildInputs;
           shellHook = "ln -s ${pkgs.jetbrains-mono}/share/fonts/truetype/JetBrainsMono-Regular.ttf ./fonts/";

@@ -49,9 +49,9 @@ impl iced::widget::button::StyleSheet for HeaderButtonStyle {
         button::Appearance {
             shadow_offset: Vector::ZERO,
             background: Some(iced::Background::Color(Color::new(
-                r * 1.2,
-                g * 1.2,
-                b * 1.2,
+                (r * 1.2).clamp(0., 1.),
+                (g * 1.2).clamp(0., 1.),
+                (b * 1.2).clamp(0., 1.),
                 a,
             ))),
             border_radius: 10.0,
@@ -141,9 +141,9 @@ impl iced::widget::button::StyleSheet for DeleteButtonStyle {
         button::Appearance {
             shadow_offset: Vector::ZERO,
             background: Some(iced::Background::Color(Color {
-                r: r * 0.8,
-                g: g * 0.8,
-                b: b * 0.8,
+                r: (r * 0.8).clamp(0.0, 1.0),
+                g: (g * 0.8).clamp(0.0, 1.0),
+                b: (b * 0.8).clamp(0.0, 1.0),
                 a,
             })),
             border_radius: 1.0,
