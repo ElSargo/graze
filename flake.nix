@@ -87,12 +87,19 @@
         ];
 
         graze = craneLib.buildPackage {
-          src = craneLib.cleanCargoSource ( craneLib.path ./. );
+          src = craneLib.cleanCargoSource (craneLib.path ./.);
           inherit nativeBuildInputs buildInputs;
         };
 
       in {
         packages.default = graze;
+        devShells.default = pkgs.mkShell rec {
+          LD_LIBRARY_PATH = nixpkgs.lib.makeLibraryPath buildInputs;
+          inherit nativeBuildInputs buildInputs;
+          MAIN_FONT_PATH =
+            "${pkgs.jetbrains-mono}/share/fonts/truetype/JetBrainsMono-Regular.ttf";
+        };
+
         apps.default = graze;
       });
 }

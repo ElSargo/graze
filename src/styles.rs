@@ -15,7 +15,7 @@ impl iced::widget::button::StyleSheet for BackButtonStyle {
         button::Appearance {
             shadow_offset: Vector::ZERO,
             background: Some(iced::Background::Color(style.palette().danger)),
-            border_radius: 10.0,
+            border_radius: 10.0.into(),
             border_width: 0.,
             border_color: Color::TRANSPARENT,
             text_color: style.palette().text,
@@ -32,7 +32,7 @@ impl iced::widget::button::StyleSheet for BackButtonStyle {
                 b * 0.9,
                 a,
             ))),
-            border_radius: 10.0,
+            border_radius: 10.0.into(),
             border_width: 0.,
             border_color: Color::TRANSPARENT,
             text_color: style.palette().text,
@@ -54,7 +54,7 @@ impl iced::widget::button::StyleSheet for HeaderButtonStyle {
                 (b * 1.2).clamp(0., 1.),
                 a,
             ))),
-            border_radius: 10.0,
+            border_radius: 10.0.into(),
             border_width: 0.,
             border_color: Color::TRANSPARENT,
             text_color: style.palette().text,
@@ -65,7 +65,7 @@ impl iced::widget::button::StyleSheet for HeaderButtonStyle {
         button::Appearance {
             shadow_offset: Vector::ZERO,
             background: Some(iced::Background::Color(style.palette().primary)),
-            border_radius: 10.0,
+            border_radius: 10.0.into(),
             border_width: 0.,
             border_color: Color::TRANSPARENT,
             text_color: style.palette().text,
@@ -98,7 +98,7 @@ pub const ICONS: Font = Font::External {
 
 pub const JBM: Font = Font::External {
     name: "JetBrainsMono-Regular",
-    bytes: include_bytes!("../fonts/JetBrainsMono-Regular.ttf"),
+    bytes: include_bytes!(std::env!("MAIN_FONT_PATH")),
 };
 
 pub fn icon(unicode: char) -> Text<'static> {
@@ -129,7 +129,7 @@ impl iced::widget::button::StyleSheet for DeleteButtonStyle {
         button::Appearance {
             shadow_offset: Vector::ZERO,
             background: Some(iced::Background::Color(style.palette().danger)),
-            border_radius: 1.0,
+            border_radius: 1.0.into(),
             border_width: 0.,
             border_color: Color::TRANSPARENT,
             text_color: style.palette().text,
@@ -146,7 +146,7 @@ impl iced::widget::button::StyleSheet for DeleteButtonStyle {
                 b: (b * 0.8).clamp(0.0, 1.0),
                 a,
             })),
-            border_radius: 1.0,
+            border_radius: 1.0.into(),
             border_width: 0.,
             border_color: Color::TRANSPARENT,
             text_color: style.palette().text,
