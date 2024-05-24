@@ -3,15 +3,15 @@ use bincode::{deserialize, serialize};
 use fuse_rust::{Fuse, SearchResult};
 use generational_map::{GenerationalKey, GenerationalMap};
 use iced::{
-    event, keyboard, subscription,
+    event,
+    keyboard::{self, key::Named, Key},
     theme::{self, Theme},
     widget::{
         self, button, column as col, container, pick_list, row, scrollable, text, text_input,
         Column, Row,
     },
-    Application, Color, Command, Element, Event, Length, Renderer, Settings, Subscription,
+    Application, Color, Command, Element, Event, Length, Settings, Subscription,
 };
-use itertools::Itertools;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -21,6 +21,7 @@ use std::{
     ops::Range,
     time::Duration,
 };
+use styles::THEME;
 mod styles;
 use styles::{
     delete_button, edit_icon, header_button, switch_button, BackButtonStyle, HeaderButtonStyle,
@@ -29,7 +30,7 @@ use styles::{
 fn main() {
     AppState::run(Settings {
         window: iced::window::Settings {
-            size: (300, 650),
+            size: iced::Size::new(300.0, 650.0),
             ..Default::default()
         },
         ..Default::default()
@@ -43,7 +44,13 @@ static MEAL_INGREDIANT_ADDER_INPUT_ID: Lazy<text_input::Id> = Lazy::new(text_inp
 
 enum AppState {
     Loaded(State),
-    Loading,
+    Loading(LoadingState),
+}
+
+struct LoadingState {
+    app_state: Option<State>,
+    main_font_loaded: bool,
+    icon_font_loaded: bool,
 }
 
 type Date = usize;
@@ -205,7 +212,9 @@ pub enum Message {
     AddMealToDay(Date, GenerationalKey),
     BackPage,
     ChangeToPage(Page),
-    Loaded(State),
+    AppStateLoaded(State),
+    MainFontLoaded,
+    IconFontLoaded,
     MealPickerInput(String),
     MealPickerSubmit(Option<GenerationalKey>),
     None,
@@ -287,13 +296,25 @@ struct Ingrediant {
 impl Application for AppState {
     type Executor = iced::executor::Default;
     type Message = Message;
-    type Theme = Theme;
+    type Theme = iced::Theme;
     type Flags = ();
 
     fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
         (
-            Self::Loading,
-            Command::perform(State::load("./data"), Message::Loaded),
+            Self::Loading(LoadingState {
+                app_state: None,
+                main_font_loaded: false,
+                icon_font_loaded: false,
+            }),
+            Command::batch([
+                Command::perform(State::load("./data"), |state| {
+                    Message::AppStateLoaded(state)
+                }),
+                iced::font::load(include_bytes!("../fonts/icons.ttf").as_slice())
+                    .map(|_| Message::IconFontLoaded),
+                iced::font::load(include_bytes!(std::env!("MAIN_FONT_PATH")).as_slice())
+                    .map(|_| Message::MainFontLoaded),
+            ]),
         )
     }
 
@@ -305,25 +326,48 @@ impl Application for AppState {
                 title.push_str(save_indicator);
                 title
             }
-            Self::Loading => "Loading".to_owned(),
+            Self::Loading(_) => "Loading".to_owned(),
         }
     }
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match self {
-            Self::Loading => {
-                if let Message::Loaded(state) = message {
-                    *self = Self::Loaded(state);
+            Self::Loading(load_state) => {
+                // if let Message::AppStateLoaded(state) = message {
+                //     *self = Self::Loaded(state);
+                // }
+
+                match message {
+                    Message::MainFontLoaded => {
+                        load_state.main_font_loaded = true;
+                    }
+                    Message::IconFontLoaded => {
+                        load_state.icon_font_loaded = true;
+                    }
+                    Message::AppStateLoaded(state) => {
+                        load_state.app_state = Some(state);
+                    }
+                    _ => unreachable!(),
                 }
+
+                if let LoadingState {
+                    app_state: Some(_),
+                    main_font_loaded: true,
+                    icon_font_loaded: true,
+                } = load_state
+                {
+                    *self = Self::Loaded(load_state.app_state.take().unwrap());
+                }
+
                 Command::none()
             }
             Self::Loaded(state) => update_ui(state, message),
         }
     }
 
-    fn view(&self) -> Element<'_, Self::Message, iced::Renderer<Self::Theme>> {
+    fn view(&self) -> Element<'_, Self::Message> {
         match self {
-            Self::Loading => text("Loading").into(),
+            Self::Loading(_) => text("Loading").into(),
             Self::Loaded(state) => {
                 let page = match &state.page {
                     Page::MealList => meal_list_view(state),
@@ -352,35 +396,43 @@ impl Application for AppState {
         //     success: Color::from_rgba(0.722, 0.733, 0.149, 1.0),
         //     danger: Color::from_rgba(0.984, 0.286, 0.204, 1.0),
         // })
-        self::Theme::Light
+        // self::Theme::Nord
+
+        // Theme::custom(
+        //     "Adw".to_owned(),
+        //     Palette {
+        //         background: Color::from_rgb(32.0 / 256.0, 32.0 / 256.0, 32.0 / 256.0),
+        //         text: Color::from_rgb(242.0 / 256.0, 242.0 / 256.0, 242.0 / 256.0),
+        //         primary: Color::from_rgb(67.0 / 256.0, 141.0 / 256.0, 230.0 / 256.0),
+        //         success: Color::from_rgb(51.0 / 256.0, 209.0 / 256.0, 122.0 / 256.0),
+        //         danger: Color::from_rgb(237.0 / 256.0, 51.0 / 256.0, 59.0 / 256.0),
+        //     },
+        // )
+        Theme::Custom(THEME.clone())
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        subscription::events_with(|event, status| match (event, status) {
+        // let x: SmolStr = SmolStr::new_inline("J");
+        event::listen_with(|event, status| match (event, status) {
             (
-                Event::Keyboard(keyboard::Event::KeyPressed {
-                    key_code: keyboard::KeyCode::Tab,
-                    modifiers,
-                    ..
-                }),
+                Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }),
                 event::Status::Ignored,
-            ) => Some(Message::TabPressed {
-                shift: modifiers.shift(),
-            }),
-            (
-                Event::Keyboard(keyboard::Event::KeyPressed {
-                    key_code: keyboard::KeyCode::Down | keyboard::KeyCode::J,
-                    ..
-                }),
-                event::Status::Ignored,
-            ) => Some(Message::VerticalMovement(1)),
-            (
-                Event::Keyboard(keyboard::Event::KeyPressed {
-                    key_code: keyboard::KeyCode::Up | keyboard::KeyCode::K,
-                    ..
-                }),
-                event::Status::Ignored,
-            ) => Some(Message::VerticalMovement(-1)),
+            ) => {
+                let key = key.as_ref();
+                match key {
+                    // key_code: keyboard::KeyCode::Tab,
+                    Key::Named(Named::Tab) => Some(Message::TabPressed {
+                        shift: modifiers.shift(),
+                    }),
+                    Key::Named(Named::ArrowDown) | Key::Character("J") => {
+                        Some(Message::VerticalMovement(1))
+                    }
+                    Key::Named(Named::ArrowUp) | Key::Character("K") => {
+                        Some(Message::VerticalMovement(-1))
+                    }
+                    _ => None,
+                }
+            }
 
             _ => None,
         })
@@ -433,7 +485,6 @@ fn update_ui(state: &mut State, message: Message) -> Command<Message> {
             state.meal_creation_input_field = input;
             Command::none()
         }
-        Message::Loaded(_) => unreachable!(),
         Message::MealPickerSubmit(meal_id) => {
             state.meal_picker_sate.selected_id = meal_id;
             back_page(state);
@@ -462,6 +513,9 @@ fn update_ui(state: &mut State, message: Message) -> Command<Message> {
                 Command::none()
             }
         } // _ => Command::none(),
+        Message::AppStateLoaded(_) | Message::MainFontLoaded | Message::IconFontLoaded => {
+            unreachable!()
+        }
     };
     let save_com = if state.save.saving || state.save.saved {
         Command::none()
@@ -637,11 +691,7 @@ fn back_page(state: &mut State) {
     }
 }
 
-fn shopping_view<'a>(
-    state: &State,
-    from: Date,
-    until: Date,
-) -> Column<'a, Message, Renderer<Theme>> {
+fn shopping_view<'a>(state: &State, from: Date, until: Date) -> Column<'a, Message> {
     let mut meals_and_count = BTreeMap::new();
     for (_, day) in state.days.range(from..until) {
         for meal_id in &day.meals {
@@ -680,153 +730,136 @@ fn shopping_view<'a>(
 
     col![
         text("Shopping"),
-        col(list
-            .iter()
-            .map(|(name, (ammount, is_liquid))| {
-                let (new_ammount, unit) = apropriate_unit(*ammount, *is_liquid);
-                text(format!(
-                    "{name}: {} {unit}",
-                    (new_ammount * 10.).round() / 10.
-                ))
-                .into()
-            })
-            .collect())
+        col(list.iter().map(|(name, (ammount, is_liquid))| {
+            let (new_ammount, unit) = apropriate_unit(*ammount, *is_liquid);
+            text(format!(
+                "{name}: {} {unit}",
+                (new_ammount * 10.).round() / 10.
+            ))
+            .into()
+        }))
     ]
 }
 
-fn meal_editor_view<'a>(
-    state: &'a State,
+fn meal_editor_view<'a>(state: &'a State, meal_id: &'a GenerationalKey) -> Column<'a, Message> {
+    let Some(meal) = state.meals.get(*meal_id) else {
+        return col![Element::<_>::from(text("Meal not found"))];
+    };
+    let rows = meal
+        .ingrediants
+        .iter()
+        .enumerate()
+        .map(|(i, ingredaint)| meal_editor_row(meal_id, i, ingredaint));
+
+    let meal_title = text(
+        state
+            .meals
+            .get(*meal_id)
+            .map_or("Unknown Meal", |meal| &meal.name),
+    );
+
+    let plus_button = button("Add").on_press(Message::AddMealIngrediant {
+        meal_id: *meal_id,
+        new_ingrediant_name: "My ingrediant".to_owned(),
+        new_ingrediant_quantity: 0.,
+        new_unit: Unit::Grams,
+    });
+
+    col![
+        meal_title,
+        col(rows).width(Length::Fill).spacing(10),
+        plus_button
+    ]
+    .spacing(10)
+}
+
+fn meal_editor_row<'a>(
     meal_id: &'a GenerationalKey,
-) -> Column<'a, Message, Renderer<Theme>> {
-    state.meals.get(*meal_id).map_or_else(
-        || col![Element::<_>::from(text("Meal not found"))],
-        |meal| {
-            let (delete_buttons, edit_name, edit_quantity, quantity_was_parsed, edit_unit) = meal
-                .ingrediants
-                .iter()
-                .enumerate()
-                .map(
-                    |(
-                        i,
-                        Ingrediant {
-                            name,
-                            quantity,
-                            quantity_input,
-                            unit,
-                        },
-                    )| {
-                        let (previous_quantity_was_parsed, quantity_input_text) =
-                            quantity_input.as_ref().map_or_else(
-                                || (false, format!("{quantity}")),
-                                |raw_input| {
-                                    let parsed_quantity: Option<f64> = raw_input.parse().ok();
-                                    (
-                                        parsed_quantity.is_some(),
-                                        parsed_quantity
-                                            .map_or_else(|| raw_input.clone(), |q| format!("{q}")),
-                                    )
-                                },
-                            );
+    i: usize,
+    Ingrediant {
+        ref name,
+        ref quantity,
+        ref quantity_input,
+        ref unit,
+    }: &Ingrediant,
+) -> Element<'a, Message> {
+    let (previous_quantity_was_parsed, quantity_input_text) = quantity_input.as_ref().map_or_else(
+        || (false, format!("{quantity}")),
+        |raw_input| {
+            let parsed_quantity: Option<f64> = raw_input.parse().ok();
+            (
+                parsed_quantity.is_some(),
+                parsed_quantity.map_or_else(|| raw_input.clone(), |q| format!("{q}")),
+            )
+        },
+    );
+    let inner = row![
+        delete_button().on_press(Message::RemoveMealIngrediant {
+            meal_name_id: *meal_id,
+            ingrediant_idx: i,
+        }),
+        text_input(name, name).on_input(move |s| Message::UpdateMealIngrediant {
+            meal_name_id: *meal_id,
+            ingrediant_idx: i,
+            field: IngrediantField::Name(s),
+        }),
+        {
+            let unstyled_input =
+                text_input("edit quantity", &quantity_input_text).on_input(move |input| {
+                    let new_quantity = input.parse().ok();
+                    Message::UpdateMealIngrediant {
+                        meal_name_id: *meal_id,
+                        ingrediant_idx: i,
+                        field: IngrediantField::Quantity(new_quantity, input),
+                    }
+                });
 
-                        (
-                            delete_button()
-                                .on_press(Message::RemoveMealIngrediant {
-                                    meal_name_id: *meal_id,
-                                    ingrediant_idx: i,
-                                })
-                                .into(),
-                            text_input(name, name)
-                                .on_input(move |s| Message::UpdateMealIngrediant {
-                                    meal_name_id: *meal_id,
-                                    ingrediant_idx: i,
-                                    field: IngrediantField::Name(s),
-                                })
-                                .into(),
-                            text_input("edit quantity", &quantity_input_text)
-                                .on_input(move |input| {
-                                    let new_quantity = input.parse().ok();
-                                    Message::UpdateMealIngrediant {
-                                        meal_name_id: *meal_id,
-                                        ingrediant_idx: i,
-                                        field: IngrediantField::Quantity(new_quantity, input),
-                                    }
-                                })
-                                .into(),
-                            if previous_quantity_was_parsed || quantity_input.is_none() {
-                                text("Y")
-                            } else {
-                                text("N")
-                            }
-                            .into(),
-                            pick_list(UNITS, Some(*unit), move |u| Message::UpdateMealIngrediant {
-                                meal_name_id: *meal_id,
-                                ingrediant_idx: i,
-                                field: IngrediantField::Unit(u),
-                            })
-                            .into(),
-                        )
-                    },
-                )
-                .multiunzip();
+            if previous_quantity_was_parsed || quantity_input.is_none() {
+                unstyled_input
+            } else {
+                unstyled_input.style(styles::InvaldTextStyle)
+            }
+        },
+        pick_list(UNITS, Some(*unit), move |u| Message::UpdateMealIngrediant {
+            meal_name_id: *meal_id,
+            ingrediant_idx: i,
+            field: IngrediantField::Unit(u),
+        }),
+    ]
+    .align_items(iced::Alignment::Center)
+    .spacing(3)
+    .padding(2);
+    container(inner)
+        .style(theme::Container::Box)
+        .align_y(iced::alignment::Vertical::Center)
+        .into()
+}
 
-            col![
+fn day_view<'a>(state: &State, date: Date) -> Column<'a, Message> {
+    let Some(day) = state.days.get(&date) else {
+        return col!["Day not found"];
+    };
+    let days = day.meals.iter().enumerate().map(|(i, id)| {
+        container(
+            row![
                 text(
                     state
                         .meals
-                        .get(*meal_id)
-                        .map_or("Unknown Meal", |meal| &meal.name)
+                        .get(*id)
+                        .map_or("meal not found", |meal| meal.name.as_str()),
                 ),
-                row![
-                    col(delete_buttons).spacing(5),
-                    col(edit_name).spacing(5).width(Length::FillPortion(2)),
-                    col(edit_quantity).spacing(5).width(Length::FillPortion(1)),
-                    col(quantity_was_parsed).spacing(5),
-                    col(edit_unit).spacing(5).width(Length::FillPortion(1))
-                ]
-                .width(Length::Fill)
-                .spacing(10), // .padding(10),
-                button("Add").on_press(Message::AddMealIngrediant {
-                    meal_id: *meal_id,
-                    new_ingrediant_name: "My ingrediant".to_owned(),
-                    new_ingrediant_quantity: 0.,
-                    new_unit: Unit::Grams,
-                })
+                col![].width(Length::Fill),
+                button(edit_icon()).on_press(Message::ChangeToPage(Page::MealEditorView(*id))),
+                delete_button().on_press(Message::RemoveMealFromDay { date, index: i })
             ]
-            .spacing(10)
-        },
-    )
-}
-
-fn day_view<'a>(state: &State, date: Date) -> Column<'a, Message, Renderer<Theme>> {
-    let Some(day )= state.days.get(&date) else {
-         return col!["Day not found"]
-    };
-    let days = day
-        .meals
-        .iter()
-        .enumerate()
-        .map(|(i, id)| {
-            container(
-                row![
-                    text(
-                        state
-                            .meals
-                            .get(*id)
-                            .map_or("meal not found", |meal| meal.name.as_str()),
-                    ),
-                    col![].width(Length::Fill),
-                    button(edit_icon()).on_press(Message::ChangeToPage(Page::MealEditorView(*id))),
-                    delete_button().on_press(Message::RemoveMealFromDay { date, index: i })
-                ]
-                .align_items(iced::Alignment::Center)
-                .spacing(10),
-            )
-            .style(theme::Container::Box)
-            .padding(5)
-            .width(Length::Fill)
-            .into()
-        })
-        .collect();
+            .align_items(iced::Alignment::Center)
+            .spacing(10),
+        )
+        .style(theme::Container::Box)
+        .padding(5)
+        .width(Length::Fill)
+        .into()
+    });
     let (selected_meal_text, submit_button) = state.meal_picker_sate.selected_id.map_or_else(
         || (text("None"), button("Add")),
         |id| {
@@ -861,7 +894,7 @@ fn day_view<'a>(state: &State, date: Date) -> Column<'a, Message, Renderer<Theme
     .spacing(10)
 }
 
-fn meal_list_view<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
+fn meal_list_view<'a>(state: &State) -> Column<'a, Message> {
     let mut list = Vec::with_capacity(state.meals.len());
     for (id, meal) in state.meals.iter() {
         list.push(
@@ -892,7 +925,7 @@ fn meal_list_view<'a>(state: &State) -> Column<'a, Message, Renderer<Theme>> {
     .spacing(10)
 }
 
-fn week_view<'a>(state: &State, range: &Range<Date>) -> Column<'a, Message, Renderer<Theme>> {
+fn week_view<'a>(state: &State, range: &Range<Date>) -> Column<'a, Message> {
     let mut week_start = range.start;
     let mut weeks = Vec::new();
     let mut week = Vec::new();
@@ -945,7 +978,7 @@ fn week_view<'a>(state: &State, range: &Range<Date>) -> Column<'a, Message, Rend
     col(weeks).spacing(10)
 }
 
-fn meal_picker_view(state: &State) -> Column<'_, Message, Renderer<Theme>> {
+fn meal_picker_view(state: &State) -> Column<'_, Message> {
     let results: Vec<(_, Element<_>)> = if state.meal_picker_sate.search_results.is_empty() {
         state
             .meals
@@ -987,8 +1020,7 @@ fn meal_picker_view(state: &State) -> Column<'_, Message, Renderer<Theme>> {
 
     let result_buttons = col(results
         .into_iter()
-        .map(|(id, ele)| button(ele).on_press(Message::MealPickerSubmit(id)).into())
-        .collect());
+        .map(|(id, ele)| button(ele).on_press(Message::MealPickerSubmit(id)).into()));
     //     col::<Message, Renderer<Theme>>(
     //     .collect(),
     // );
@@ -1028,7 +1060,7 @@ fn higlight_search_result<'a>(
     state: &'a State,
     result: &SearchResultPlus,
     i: usize,
-) -> Option<Row<'a, Message, Renderer<Theme>>> {
+) -> Option<Row<'a, Message>> {
     let meal_id = state.meal_picker_sate.searched_meal_ids.get(result.index)?;
     let meal_name = &state.meals.get(*meal_id)?.name;
     let mut text_substrings: Vec<Element<Message>> = Vec::new();
@@ -1062,7 +1094,7 @@ fn higlight_search_result<'a>(
     Some(row(text_substrings))
 }
 
-fn bar_view<'a>(state: &'a State) -> Row<'a, Message, Renderer<Theme>> {
+fn bar_view<'a>(state: &'a State) -> Row<'a, Message> {
     let on_press_and = |button: widget::Button<'a, Message, _>, message, predicate| {
         if predicate {
             button.on_press(message)
