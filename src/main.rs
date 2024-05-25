@@ -793,42 +793,43 @@ fn meal_editor_row<'a>(
             )
         },
     );
-    let inner = row![
-        delete_button().on_press(Message::RemoveMealIngrediant {
-            meal_name_id: *meal_id,
-            ingrediant_idx: i,
-        }),
-        text_input(name, name).on_input(move |s| Message::UpdateMealIngrediant {
-            meal_name_id: *meal_id,
-            ingrediant_idx: i,
-            field: IngrediantField::Name(s),
-        }),
-        {
-            let unstyled_input =
-                text_input("edit quantity", &quantity_input_text).on_input(move |input| {
-                    let new_quantity = input.parse().ok();
-                    Message::UpdateMealIngrediant {
-                        meal_name_id: *meal_id,
-                        ingrediant_idx: i,
-                        field: IngrediantField::Quantity(new_quantity, input),
-                    }
-                });
 
-            if previous_quantity_was_parsed || quantity_input.is_none() {
-                unstyled_input
-            } else {
-                unstyled_input.style(styles::InvaldTextStyle)
-            }
-        },
-        pick_list(UNITS, Some(*unit), move |u| Message::UpdateMealIngrediant {
-            meal_name_id: *meal_id,
-            ingrediant_idx: i,
-            field: IngrediantField::Unit(u),
-        }),
-    ]
-    .align_items(iced::Alignment::Center)
-    .spacing(3)
-    .padding(2);
+    let delete_button = delete_button().on_press(Message::RemoveMealIngrediant {
+        meal_name_id: *meal_id,
+        ingrediant_idx: i,
+    });
+
+    let name_feild = text_input(name, name).on_input(move |s| Message::UpdateMealIngrediant {
+        meal_name_id: *meal_id,
+        ingrediant_idx: i,
+        field: IngrediantField::Name(s),
+    });
+    let quantity_feild = {
+        let unstyled_input =
+            text_input("edit quantity", &quantity_input_text).on_input(move |input| {
+                let new_quantity = input.parse().ok();
+                Message::UpdateMealIngrediant {
+                    meal_name_id: *meal_id,
+                    ingrediant_idx: i,
+                    field: IngrediantField::Quantity(new_quantity, input),
+                }
+            });
+
+        if previous_quantity_was_parsed || quantity_input.is_none() {
+            unstyled_input
+        } else {
+            unstyled_input.style(styles::InvaldTextStyle)
+        }
+    };
+    let unit_select = pick_list(UNITS, Some(*unit), move |u| Message::UpdateMealIngrediant {
+        meal_name_id: *meal_id,
+        ingrediant_idx: i,
+        field: IngrediantField::Unit(u),
+    });
+    let inner = row![delete_button, name_feild, quantity_feild, unit_select]
+        .align_items(iced::Alignment::Center)
+        .spacing(3)
+        .padding(2);
     container(inner)
         .style(theme::Container::Box)
         .align_y(iced::alignment::Vertical::Center)

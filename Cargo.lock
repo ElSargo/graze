@@ -1224,6 +1224,7 @@ dependencies = [
  "directories-next",
  "fuse-rust",
  "iced",
+ "iced_aw",
  "itertools",
  "lazy_static",
  "once_cell",
@@ -1327,6 +1328,17 @@ dependencies = [
  "iced_widget",
  "iced_winit",
  "thiserror",
+]
+
+[[package]]
+name = "iced_aw"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e68c330918a95bd73176206d65b84efe9aee6581da0e6dea0390cd146d7214c"
+dependencies = [
+ "cfg-if",
+ "iced",
+ "num-traits",
 ]
 
 [[package]]
