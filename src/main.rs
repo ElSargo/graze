@@ -242,7 +242,7 @@ pub enum Message {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IngrediantField {
-    Quantity(Option<f64>, String),
+    Quantity(f64),
     Name(String),
     Unit(Unit),
 }
@@ -289,7 +289,7 @@ struct Meal {
 struct Ingrediant {
     name: String,
     quantity: f64,
-    quantity_input: Option<String>,
+    // quantity_input: Option<String>,
     unit: Unit,
 }
 
@@ -372,7 +372,7 @@ impl Application for AppState {
                 let page = match &state.page {
                     Page::MealList => meal_list_view(state),
                     Page::DayView(date) => day_view(state, *date),
-                    Page::MealEditorView(meal_id) => meal_editor_view(state, meal_id),
+                    Page::MealEditorView(meal_id) => meal_editor_view(state, *meal_id),
                     Page::WeekView(range) => week_view(state, range),
                     Page::ShoppingView { from, until } => shopping_view(state, *from, *until),
                     Page::MealPicker => meal_picker_view(state),
@@ -557,7 +557,7 @@ fn on_message_add_meal_ingrediant(
         meal.ingrediants.push(Ingrediant {
             name: new_ingrediant_name,
             quantity: new_ingrediant_quantity,
-            quantity_input: None,
+            // quantity_input: None,
             unit: new_unit,
         });
     }
@@ -660,16 +660,13 @@ fn on_message_update_meal_ingrediant(
         if let Some(Ingrediant {
             name,
             quantity,
-            quantity_input,
+            // quantity_input,
             unit,
         }) = meal.ingrediants.get_mut(ingrediant_idx)
         {
             match field {
-                IngrediantField::Quantity(new_quantity_option, new_quantity_input) => {
-                    if let Some(new_quantity) = new_quantity_option {
-                        *quantity = new_quantity;
-                    }
-                    *quantity_input = Some(new_quantity_input);
+                IngrediantField::Quantity(new_quantity) => {
+                    *quantity = new_quantity;
                 }
                 IngrediantField::Name(new_name) => {
                     *name = new_name;
@@ -677,7 +674,7 @@ fn on_message_update_meal_ingrediant(
                 IngrediantField::Unit(new_unit) => {
                     *quantity = unit.to_grams(*quantity) / new_unit.to_grams(1.);
                     *unit = new_unit;
-                    *quantity_input = None;
+                    // *quantity_input = None;
                 }
             }
         }
@@ -709,7 +706,7 @@ fn shopping_view<'a>(state: &State, from: Date, until: Date) -> Column<'a, Messa
             for Ingrediant {
                 name,
                 quantity,
-                quantity_input: _,
+                // quantity_input: _,
                 unit,
             } in &meal.ingrediants
             {
@@ -741,8 +738,8 @@ fn shopping_view<'a>(state: &State, from: Date, until: Date) -> Column<'a, Messa
     ]
 }
 
-fn meal_editor_view<'a>(state: &'a State, meal_id: &'a GenerationalKey) -> Column<'a, Message> {
-    let Some(meal) = state.meals.get(*meal_id) else {
+fn meal_editor_view<'a>(state: &'a State, meal_id: GenerationalKey) -> Column<'a, Message> {
+    let Some(meal) = state.meals.get(meal_id) else {
         return col![Element::<_>::from(text("Meal not found"))];
     };
     let rows = meal
@@ -754,12 +751,12 @@ fn meal_editor_view<'a>(state: &'a State, meal_id: &'a GenerationalKey) -> Colum
     let meal_title = text(
         state
             .meals
-            .get(*meal_id)
+            .get(meal_id)
             .map_or("Unknown Meal", |meal| &meal.name),
     );
 
     let plus_button = button("Add").on_press(Message::AddMealIngrediant {
-        meal_id: *meal_id,
+        meal_id,
         new_ingrediant_name: "My ingrediant".to_owned(),
         new_ingrediant_quantity: 0.,
         new_unit: Unit::Grams,
@@ -774,55 +771,36 @@ fn meal_editor_view<'a>(state: &'a State, meal_id: &'a GenerationalKey) -> Colum
 }
 
 fn meal_editor_row<'a>(
-    meal_id: &'a GenerationalKey,
+    meal_id: GenerationalKey,
     i: usize,
     Ingrediant {
         ref name,
-        ref quantity,
-        ref quantity_input,
+        quantity,
+        // ref quantity_input,
         ref unit,
     }: &Ingrediant,
 ) -> Element<'a, Message> {
-    let (previous_quantity_was_parsed, quantity_input_text) = quantity_input.as_ref().map_or_else(
-        || (false, format!("{quantity}")),
-        |raw_input| {
-            let parsed_quantity: Option<f64> = raw_input.parse().ok();
-            (
-                parsed_quantity.is_some(),
-                parsed_quantity.map_or_else(|| raw_input.clone(), |q| format!("{q}")),
-            )
-        },
-    );
-
     let delete_button = delete_button().on_press(Message::RemoveMealIngrediant {
-        meal_name_id: *meal_id,
+        meal_name_id: meal_id,
         ingrediant_idx: i,
     });
 
     let name_feild = text_input(name, name).on_input(move |s| Message::UpdateMealIngrediant {
-        meal_name_id: *meal_id,
+        meal_name_id: meal_id,
         ingrediant_idx: i,
         field: IngrediantField::Name(s),
     });
-    let quantity_feild = {
-        let unstyled_input =
-            text_input("edit quantity", &quantity_input_text).on_input(move |input| {
-                let new_quantity = input.parse().ok();
-                Message::UpdateMealIngrediant {
-                    meal_name_id: *meal_id,
-                    ingrediant_idx: i,
-                    field: IngrediantField::Quantity(new_quantity, input),
-                }
-            });
 
-        if previous_quantity_was_parsed || quantity_input.is_none() {
-            unstyled_input
-        } else {
-            unstyled_input.style(styles::InvaldTextStyle)
+    let quantity_feild = iced_aw::number_input(*quantity, 9999.0, move |input| {
+        Message::UpdateMealIngrediant {
+            meal_name_id: meal_id.clone(),
+            ingrediant_idx: i,
+            field: IngrediantField::Quantity(input),
         }
-    };
+    });
+
     let unit_select = pick_list(UNITS, Some(*unit), move |u| Message::UpdateMealIngrediant {
-        meal_name_id: *meal_id,
+        meal_name_id: meal_id,
         ingrediant_idx: i,
         field: IngrediantField::Unit(u),
     });
