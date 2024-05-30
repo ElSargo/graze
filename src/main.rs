@@ -1,5 +1,6 @@
 mod day_page;
 mod generational_map;
+mod page;
 use color_eyre::Result;
 use day_page::DayPage;
 mod ingrediant;
@@ -47,8 +48,6 @@ fn main() -> Result<()> {
 }
 
 static MEAL_ADDER_INPUT_ID: Lazy<text_input::Id> = Lazy::new(text_input::Id::unique);
-static MEAL_PICKER_INPUT_ID: Lazy<text_input::Id> = Lazy::new(text_input::Id::unique);
-static MEAL_INGREDIANT_ADDER_INPUT_ID: Lazy<text_input::Id> = Lazy::new(text_input::Id::unique);
 
 enum AppState {
     Loaded(Box<State>),
@@ -72,9 +71,6 @@ pub struct State {
     ingrediants: GenerationalMap<Ingrediant>,
     meal_creation_input_field: String,
     save: SaveState,
-    #[serde(skip_serializing)]
-    #[serde(skip_deserializing)]
-    picker_state: Option<PickerState>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
