@@ -44,9 +44,9 @@ impl PickerState {
                 .enumerate()
                 .filter_map(|(i, result)| {
                     self.higlight_search_result(result, i)
-                        .map(|content| (result, content))
+                        .map(|content|  content)
                 })
-                .map(|(result, row)| row.into())
+                .map(| row| row.into())
                 .collect()
         };
 

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::{
     col,
     generational_map::GenerationalMap,
@@ -11,7 +9,6 @@ use crate::{
 
 use super::PickerState;
 
-use color_eyre::owo_colors::OwoColorize;
 use iced::{
     theme,
     widget::{button, container, pick_list, scrollable, text},

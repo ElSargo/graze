@@ -1,13 +1,8 @@
 use crate::{
-    generational_map::GenerationalMap,
-    meal::{Meal, MealKey},
-    picker::PickerState,
-    styles::{delete_button, edit_icon, switch_button},
-    Date, Message, State,
+    generational_map::GenerationalMap, meal::Meal, picker::PickerState, Date, Message, State,
 };
 use iced::{
-    theme,
-    widget::{button, column as col, container, row, scrollable, text},
+    widget::{button, column as col, scrollable, text},
     Command, Element, Length,
 };
 use iced_aw::{floating_element, modal};

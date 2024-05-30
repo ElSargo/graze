@@ -33,7 +33,7 @@ use std::{
 use styles::THEME;
 use unit::*;
 mod styles;
-use styles::{delete_button, edit_icon, header_button, BackButtonStyle, HeaderButtonStyle};
+use styles::{header_button, BackButtonStyle, HeaderButtonStyle};
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -473,14 +473,6 @@ fn active_picker_mut<'a>(state: &'a mut State) -> Option<&'a mut PickerState> {
         Page::MealEditorView(ref mut ed) => ed.ingredaint_picker.as_mut(),
         _ => None,
     }
-}
-
-fn on_message_vertical_movement(offset: isize, state: &mut State) -> Command<Message> {
-    if let Some(picker) = active_picker_mut(state) {
-        picker.vertical_movement(offset)
-    }
-
-    Command::none()
 }
 
 fn on_message_add_meal_ingrediant(state: &mut State) -> Command<Message> {
