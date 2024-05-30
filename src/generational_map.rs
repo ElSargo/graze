@@ -1,28 +1,77 @@
+use std::marker::PhantomData;
+
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-pub struct GenerationalKey {
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct GenerationalKey<T> {
     index: usize,
     generation: usize,
+    marker: PhantomData<T>,
+}
+impl<T> Clone for GenerationalKey<T> {
+    fn clone(&self) -> Self {
+        Self {
+            index: self.index,
+            generation: self.generation,
+            marker: PhantomData,
+        }
+    }
+}
+impl<T> Copy for GenerationalKey<T> {}
+impl<T> Ord for GenerationalKey<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        unsafe {
+            let a: u128 = std::mem::transmute(*self);
+            let b: u128 = std::mem::transmute(*other);
+            Ord::cmp(&a, &b)
+        }
+    }
+}
+impl<T> PartialOrd for GenerationalKey<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        unsafe {
+            let a: u128 = std::mem::transmute(*self);
+            let b: u128 = std::mem::transmute(*other);
+            Some(Ord::cmp(&a, &b))
+        }
+    }
+}
+impl<T> Eq for GenerationalKey<T> {}
+
+impl<T> PartialEq for GenerationalKey<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index && self.generation == other.generation
+    }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GenerationalMap<T> {
     data: Vec<(usize, Option<T>)>,
     free: Vec<usize>,
 }
 
+impl<T> Default for GenerationalMap<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> GenerationalMap<T> {
-    pub fn push(&mut self, item: T) -> GenerationalKey {
+    pub fn push(&mut self, item: T) -> GenerationalKey<T> {
         if let Some(index) = self.free.pop() {
             let generation = self.data[index].0 + 1;
             self.data[index] = (generation, Some(item));
-            GenerationalKey { index, generation }
+            GenerationalKey {
+                index,
+                generation,
+                marker: PhantomData,
+            }
         } else {
             self.data.push((0, Some(item)));
             GenerationalKey {
                 index: self.data.len() - 1,
                 generation: 0,
+                marker: PhantomData,
             }
         }
     }
@@ -31,7 +80,7 @@ impl<T> GenerationalMap<T> {
         self.data.len() - self.free.len()
     }
 
-    pub fn remove(&mut self, key: GenerationalKey) -> Option<T> {
+    pub fn remove(&mut self, key: GenerationalKey<T>) -> Option<T> {
         self.data.get_mut(key.index).and_then(|(generation, item)| {
             (*generation == key.generation).then_some(()).and_then(|_| {
                 self.free.push(key.index);
@@ -40,7 +89,7 @@ impl<T> GenerationalMap<T> {
         })
     }
 
-    pub fn get(&self, key: GenerationalKey) -> Option<&T> {
+    pub fn get(&self, key: GenerationalKey<T>) -> Option<&T> {
         self.data.get(key.index).and_then(|(generation, item)| {
             (*generation == key.generation)
                 .then_some(())
@@ -48,7 +97,7 @@ impl<T> GenerationalMap<T> {
         })
     }
 
-    pub fn get_mut(&mut self, key: GenerationalKey) -> Option<&mut T> {
+    pub fn get_mut(&mut self, key: GenerationalKey<T>) -> Option<&mut T> {
         self.data.get_mut(key.index).and_then(|(generation, item)| {
             (*generation == key.generation)
                 .then_some(())
@@ -56,7 +105,7 @@ impl<T> GenerationalMap<T> {
         })
     }
 
-    pub fn contains_key(&self, key: GenerationalKey) -> bool {
+    pub fn contains_key(&self, key: GenerationalKey<T>) -> bool {
         self.data
             .get(key.index)
             .map_or(false, |(generation, item)| {
@@ -64,7 +113,7 @@ impl<T> GenerationalMap<T> {
             })
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (GenerationalKey, &'_ T)> {
+    pub fn iter(&self) -> impl Iterator<Item = (GenerationalKey<T>, &'_ T)> {
         self.data
             .iter()
             .enumerate()
@@ -74,6 +123,7 @@ impl<T> GenerationalMap<T> {
                         GenerationalKey {
                             index,
                             generation: *generation,
+                            marker: PhantomData,
                         },
                         item,
                     )
@@ -82,7 +132,7 @@ impl<T> GenerationalMap<T> {
     }
 
     #[allow(dead_code)]
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (GenerationalKey, &'_ mut T)> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (GenerationalKey<T>, &'_ mut T)> {
         self.data
             .iter_mut()
             .enumerate()
@@ -92,6 +142,7 @@ impl<T> GenerationalMap<T> {
                         GenerationalKey {
                             index,
                             generation: *generation,
+                            marker: PhantomData,
                         },
                         item,
                     )
@@ -99,7 +150,7 @@ impl<T> GenerationalMap<T> {
             })
     }
 
-    pub fn keys(&self) -> impl Iterator<Item = GenerationalKey> + '_ {
+    pub fn keys(&self) -> impl Iterator<Item = GenerationalKey<T>> + '_ {
         self.data
             .iter()
             .enumerate()
@@ -107,6 +158,7 @@ impl<T> GenerationalMap<T> {
                 wraped_item.as_ref().map(|_| GenerationalKey {
                     index,
                     generation: *generation,
+                    marker: PhantomData,
                 })
             })
     }
@@ -276,7 +328,8 @@ mod tests {
             Some((
                 GenerationalKey {
                     index: 0,
-                    generation: 0
+                    generation: 0,
+                    marker: PhantomData
                 },
                 &1
             ))
@@ -286,7 +339,8 @@ mod tests {
             Some((
                 GenerationalKey {
                     index: 1,
-                    generation: 0
+                    generation: 0,
+                    marker: PhantomData
                 },
                 &2
             ))
@@ -296,7 +350,8 @@ mod tests {
             Some((
                 GenerationalKey {
                     index: 2,
-                    generation: 0
+                    generation: 0,
+                    marker: PhantomData
                 },
                 &6
             ))
