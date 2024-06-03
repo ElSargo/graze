@@ -2,7 +2,9 @@ use crate::{
     col,
     generational_map::GenerationalMap,
     ingrediant::{Ingrediant, IngrediantKey, IngrediantQuantity},
-    meal, row,
+    meal,
+    page::AnyPage,
+    row,
     styles::delete_button,
     IngrediantField, Message, State, UNITS,
 };
@@ -23,7 +25,45 @@ pub struct MealEditorPage {
     pub(crate) meal_id: MealKey,
     #[serde(skip_serializing)]
     #[serde(skip_deserializing)]
-    pub ingredaint_picker: Option<PickerState>,
+    pub ingredaint_picker: Option<PickerState<MessageConverter>>,
+}
+
+impl AnyPage for MealEditorPage {
+    fn view<'a>(&'a self, state: &'a State) -> Element<'a, Message> {
+        self.view(state)
+    }
+
+    fn vertical_movement(&mut self, ammount: isize) -> Command<Message> {
+        self.ingredaint_picker
+            .as_mut()
+            .map(|pk| pk.vertical_movement(ammount));
+        Command::none()
+    }
+
+    fn close_popup(&mut self) -> Command<Message> {
+        self.close_picker();
+        Command::none()
+    }
+
+    fn open_picker(&mut self, state: &State) -> Command<Message> {
+        self.open_ingrediant_picker(&state.ingrediants)
+    }
+
+    fn on_tab(&mut self, _: bool) -> Command<Message> {
+        self.ingredaint_picker.as_mut().map(|pk| pk.fill_input());
+        Command::none()
+    }
+}
+
+#[derive(Clone)]
+struct MessageConverter {
+    meal_id: MealKey,
+}
+
+impl crate::picker::NameToMessageConverter for MessageConverter {
+    fn convert(&self, name: std::sync::Arc<str>) -> Message {
+        Message::IngrediantPickedForMeal(name, self.meal_id)
+    }
 }
 
 impl MealEditorPage {
@@ -86,7 +126,9 @@ impl MealEditorPage {
                     .iter()
                     .map(|(_key, ing)| ing.name.clone())
                     .collect_vec(),
-                Message::IngrediantPickedForMeal,
+                MessageConverter {
+                    meal_id: self.meal_id,
+                },
             ))
         }
         iced::widget::text_input::focus(

@@ -14,7 +14,18 @@ pub struct DayPage {
     pub date: Date,
     #[serde(skip_serializing)]
     #[serde(skip_deserializing)]
-    meal_picker: Option<PickerState>,
+    meal_picker: Option<PickerState<MessageConverter>>,
+}
+
+#[derive(Clone)]
+struct MessageConverter {
+    date: Date,
+}
+
+impl crate::picker::NameToMessageConverter for MessageConverter {
+    fn convert(&self, name: std::sync::Arc<str>) -> Message {
+        Message::MealAddedToDay(name, self.date)
+    }
 }
 
 impl DayPage {
@@ -33,7 +44,7 @@ impl DayPage {
         if !self.meal_picker.is_some() {
             self.meal_picker = Some(PickerState::new(
                 meals.iter().map(|(_key, ing)| ing.name.clone()).collect(),
-                Message::MealAddedToDay,
+                MessageConverter { date: self.date },
             ))
         }
         // iced::widget::text_input::focus(self.meal_picker.as_ref().unwrap().input_feild_id.clone())

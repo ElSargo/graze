@@ -18,7 +18,7 @@ pub type MealKey = GenerationalKey<Meal>;
 use iced::{
     theme,
     widget::{button, row, text},
-    Length,
+    Element, Length,
 };
 
 use iced::widget::container;
@@ -33,7 +33,7 @@ pub fn meal_row_view(
     meal: &Meal,
     id: MealKey,
     on_delete: Message,
-) -> iced::advanced::graphics::core::Element<'_, Message, Theme, iced::Renderer> {
+) -> Element<'_, Message, Theme, iced::Renderer> {
     let label = text(&meal.name).size(20).width(Length::Fill);
     let edit_button = button(edit_icon()).on_press(Message::ChangeToPage(Page::MealEditorView(
         MealEditorPage::new(id),

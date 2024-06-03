@@ -13,9 +13,13 @@ use std::{ops::Range, sync::Arc};
 
 use crate::Message;
 
+pub trait NameToMessageConverter {
+    fn convert(&self, name: Arc<str>) -> Message;
+}
+
 #[derive(Clone)]
-pub struct PickerState {
-    on_pick: fn(Arc<str>) -> Message,
+pub struct PickerState<C: NameToMessageConverter> {
+    on_pick: C,
     input_field: String,
     search_results: Vec<SearchResult>,
     selection_index: usize,
@@ -23,7 +27,7 @@ pub struct PickerState {
     pub input_feild_id: text_input::Id
 }
 
-impl PickerState {
+impl<C: NameToMessageConverter> PickerState<C> {
     pub fn view(&self) -> Element<'_, Message> {
         let results: Vec<Element<_>> = if self.search_results.is_empty() {
             self.search_feilds
@@ -51,7 +55,7 @@ impl PickerState {
         };
 
         let result_buttons = col(results.into_iter().zip(self.search_feilds.iter()).map(
-            |(ele,name)| button(ele).on_press((self.on_pick)(name.clone())).into()
+            |(ele,name)| button(ele).on_press(self.on_pick.convert(name.clone())).into()
         ));
 
         let selected_result = 
@@ -67,7 +71,7 @@ impl PickerState {
         let input_feild = 
             text_input("Search", &self.input_field)
                 .on_input(Message::MealPickerInput)
-                .on_submit((self.on_pick)(selected_result))
+                .on_submit(self.on_pick.convert(selected_result))
                 .id( self.input_feild_id.clone() );
 
         
@@ -123,7 +127,7 @@ impl PickerState {
         Some(row(text_substrings))
     }
 
-    pub fn new(search_feilds: Vec<Arc<str>>, on_pick: fn(Arc<str>) -> Message) -> Self {
+    pub fn new(search_feilds: Vec<Arc<str>>, on_pick: C) -> Self {
         Self {
             on_pick,
             input_field: String::new(),
@@ -173,7 +177,7 @@ impl PickerState {
     }
 }
 
-impl std::fmt::Debug for PickerState {
+impl<C: NameToMessageConverter  > std::fmt::Debug for PickerState<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "App state")
     }

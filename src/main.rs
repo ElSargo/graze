@@ -3,6 +3,7 @@ mod generational_map;
 mod page;
 use color_eyre::Result;
 use day_page::DayPage;
+use page::Page;
 mod ingrediant;
 mod meal;
 mod meal_editor;
@@ -79,26 +80,11 @@ struct SaveState {
     saving: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Page {
-    DayView(day_page::DayPage),
-    MealList,
-    MealEditorView(meal_editor::MealEditorPage),
-    ShoppingView { from: Date, until: Date },
-    WeekView(Range<Date>),
-}
-
-impl Default for Page {
-    fn default() -> Self {
-        Self::WeekView(1..100)
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum Message {
     ClosePicker,
 
-    MealAddedToDay(Arc<str>),
+    MealAddedToDay(Arc<str>, Date),
     AddDay(Date),
     AddMeal,
     AddMealIngrediant,
@@ -132,7 +118,7 @@ pub enum Message {
     },
     VerticalMovement(isize),
 
-    IngrediantPickedForMeal(Arc<str>),
+    IngrediantPickedForMeal(Arc<str>, MealKey),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -367,16 +353,17 @@ fn update_ui(state: &mut State, message: Message) -> Command<Message> {
             Command::none()
         }
         Message::TabPressed { shift } => {
-            if let Some(picker) = active_picker_mut(state) {
-                picker.fill_input();
-                Command::none()
-            } else {
-                if shift {
-                    widget::focus_previous()
-                } else {
-                    widget::focus_next()
-                }
-            }
+            state.page.as_any().on_tab(shift)
+            // if let Some(picker) = active_picker_mut(state) {
+            //     picker.fill_input();
+            //     Command::none()
+            // } else {
+            //     if shift {
+            //         widget::focus_previous()
+            //     } else {
+            //         widget::focus_next()
+            //     }
+            // }
         }
         Message::None => Command::none(),
         Message::RemoveMealFromDay { date, index } => {
@@ -392,7 +379,9 @@ fn update_ui(state: &mut State, message: Message) -> Command<Message> {
         Message::AppStateLoaded(_) | Message::MainFontLoaded | Message::IconFontLoaded => {
             unreachable!()
         }
-        Message::IngrediantPickedForMeal(name) => on_ingrediant_picked_for_meal(state, name),
+        Message::IngrediantPickedForMeal(name, meal_id) => {
+            on_ingrediant_picked_for_meal(state, name, meal_id)
+        }
         Message::ClosePicker => {
             match state.page {
                 Page::MealEditorView(ref mut editor) => editor.close_picker(),
@@ -400,7 +389,7 @@ fn update_ui(state: &mut State, message: Message) -> Command<Message> {
             };
             Command::none()
         }
-        Message::MealAddedToDay(name) => on_meal_picked_for_date(state, name),
+        Message::MealAddedToDay(name, date) => on_meal_picked_for_date(state, name, date),
     };
     let save_com = if state.save.saving || state.save.saved {
         Command::none()
@@ -412,7 +401,11 @@ fn update_ui(state: &mut State, message: Message) -> Command<Message> {
     Command::batch([com, save_com])
 }
 
-fn on_ingrediant_picked_for_meal(state: &mut State, name: Arc<str>) -> Command<Message> {
+fn on_ingrediant_picked_for_meal(
+    state: &mut State,
+    name: Arc<str>,
+    meal_id: MealKey,
+) -> Command<Message> {
     let Page::MealEditorView(ref mut editor) = state.page else {
         return Command::none();
     };
@@ -425,7 +418,7 @@ fn on_ingrediant_picked_for_meal(state: &mut State, name: Arc<str>) -> Command<M
     let ingredaint_key =
         ingredaint_key.unwrap_or_else(|| state.ingrediants.push(Ingrediant { name: name.into() }));
 
-    let Some(meal) = state.meals.get_mut(editor.meal_id) else {
+    let Some(meal) = state.meals.get_mut(meal_id) else {
         return Command::none();
     };
 
@@ -442,7 +435,7 @@ fn on_ingrediant_picked_for_meal(state: &mut State, name: Arc<str>) -> Command<M
     Command::none()
 }
 
-fn on_meal_picked_for_date(state: &mut State, name: Arc<str>) -> Command<Message> {
+fn on_meal_picked_for_date(state: &mut State, name: Arc<str>, date: Date) -> Command<Message> {
     let Page::DayView(ref mut editor) = state.page else {
         return Command::none();
     };
@@ -459,20 +452,13 @@ fn on_meal_picked_for_date(state: &mut State, name: Arc<str>) -> Command<Message
         })
     });
 
-    if let Some(day) = state.days.get_mut(&editor.date) {
+    if let Some(day) = state.days.get_mut(&date) {
         day.meals.push(meal_key);
         editor.close_picker();
     }
 
     // id
     Command::none()
-}
-
-fn active_picker_mut<'a>(state: &'a mut State) -> Option<&'a mut PickerState> {
-    match state.page {
-        Page::MealEditorView(ref mut ed) => ed.ingredaint_picker.as_mut(),
-        _ => None,
-    }
 }
 
 fn on_message_add_meal_ingrediant(state: &mut State) -> Command<Message> {
